@@ -18,6 +18,37 @@ see [CREDITS.md](CREDITS.md).
 **Pricing needs Frostreaver**, the only server TLP-Auctions has data for. Everything else — inventory,
 gear, roster, lockouts, macros — works on any server.
 
+## Screenshots
+
+**Macro Builder** — every toon's inventory merged into one list, priced against live
+TLP-Auctions data, with market flags on each row.
+
+![Macro Builder](docs/screenshots/01-macro-builder.png)
+
+**My Characters** — accounts, the current login set (one toon per account), and readiness
+at a glance.
+
+![My Characters](docs/screenshots/02-my-characters.png)
+
+<details>
+<summary>More — comp builder, lockout board, generated macros, setup</summary>
+
+**Comp Builder** — six-boxes with one-character-per-account enforced, and role-gap warnings.
+![Comp Builder](docs/screenshots/03-comp-builder.png)
+
+**Lockout Board** — per raid × account, who's free to field a run right now.
+![Lockout Board](docs/screenshots/04-lockout-board.png)
+
+**Generated macros** — packed into `[Socials]` buttons of clickable item links.
+![Generated macros](docs/screenshots/06-generated-macro.png)
+
+**Setup** — finds your EverQuest and MacroQuest folders, and shows what's arriving from the game.
+![Setup](docs/screenshots/05-setup.png)
+
+</details>
+
+> Screenshots use placeholder character names and a sample roster. The item data and prices are real.
+
 ## What it does
 
 **Selling**
