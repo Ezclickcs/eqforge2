@@ -50,7 +50,7 @@ already made it.
 
 local mq = require('mq')
 
-local VERSION = '1.1.0'   -- BUMP THIS on every functional change. MQ loads a Lua
+local VERSION = '1.1.1'   -- BUMP THIS on every functional change. MQ loads a Lua
                           -- script ONCE at start, so a client that was already
                           -- running keeps the old code after you copy a new file
                           -- in. Without a version you can read, that is invisible:
@@ -836,7 +836,19 @@ local function main(...)
     end
 
     mq.bind('/eqf', onCommand)
-    mq.event('eqf_camp', '#*#prepare your camp#*#', onCampStart)
+    -- CAMP START ONLY. The first pattern here was '#*#prepare your camp#*#', which also
+    -- matched every countdown tick ("It will take about 25 MORE seconds to prepare your
+    -- camp."). The 15s trigger cooldown hid the early ticks, then the ~20s tick landed
+    -- just past it and fired a SECOND full export - measured in a live log: dumps at
+    -- 16:10:36 and again at 16:10:55 off one camp.
+    -- "you" is the discriminator: the start line says "It will take YOU about N
+    -- seconds", every tick says "It will take about N MORE seconds". The restart line
+    -- ("about 30 more seconds") is a genuinely new camp after an interrupted one, so it
+    -- gets its own event rather than being lumped in with the ticks.
+    mq.event('eqf_camp', 'It will take you about #1# seconds to prepare your camp.',
+             onCampStart)
+    mq.event('eqf_camp_restart', 'It will take about 30 more seconds to prepare your camp.',
+             onCampStart)
 
     info('EQ Forge addon v%s loaded. /eqf for commands.', VERSION)
     if settings.camp then
