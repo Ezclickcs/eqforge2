@@ -1,0 +1,941 @@
+{
+ "_meta": {
+  "source": "raidloot 'Quest: Kael/Skyshrine/Thurgadin' rows + eqprogression gems + items.txt.gz",
+  "tiers": [
+   "Ancient (Kael)",
+   "Unadorned (Skyshrine)",
+   "Corroded (Thurgadin)"
+  ],
+  "note": "each slot lists up to 3 buildable options (one per mold tier). app injects a finished piece as an upgrade candidate for each option whose moldId you own"
+ },
+ "Monk": {
+  "slots": {
+   "Head": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25440,
+     "finishedName": "Golden Star Headband",
+     "moldId": 24919,
+     "moldName": "Ancient Leather Cap",
+     "gems": "3x Crushed Coral"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31189,
+     "finishedName": "White Lotus Headband",
+     "moldId": 24975,
+     "moldName": "Unadorned Leather Cap",
+     "gems": "3x Crushed Coral"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31091,
+     "finishedName": "Grand Master's Headband",
+     "moldId": 24947,
+     "moldName": "Eroded Leather Cap",
+     "gems": "3x Crushed Coral"
+    }
+   ],
+   "Arms": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25442,
+     "finishedName": "Golden Star Arm Wraps",
+     "moldId": 24916,
+     "moldName": "Ancient Leather Sleeves",
+     "gems": "3x Flawed Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31191,
+     "finishedName": "White Lotus Arm Wraps",
+     "moldId": 24972,
+     "moldName": "Unadorned Leather Sleeves",
+     "gems": "3x Flawed Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31093,
+     "finishedName": "Grand Master's Arm Wraps",
+     "moldId": 24944,
+     "moldName": "Eroded Leather Sleeves",
+     "gems": "3x Flawed Emerald"
+    }
+   ],
+   "Wrist": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25443,
+     "finishedName": "Golden Star Wrist Wraps",
+     "moldId": 24918,
+     "moldName": "Ancient Leather Bracelet",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31192,
+     "finishedName": "White Lotus Wrist Wraps",
+     "moldId": 24974,
+     "moldName": "Unadorned Leather Bracelet",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31094,
+     "finishedName": "Grand Master's Wrist Wraps",
+     "moldId": 24946,
+     "moldName": "Eroded Leather Bracelet",
+     "gems": "3x Crushed Flame Emerald"
+    }
+   ],
+   "Hands": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25444,
+     "finishedName": "Fist of the Golden Star",
+     "moldId": 24920,
+     "moldName": "Ancient Leather Gloves",
+     "gems": "3x Crushed Topaz"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31193,
+     "finishedName": "Fist of the White Lotus",
+     "moldId": 24976,
+     "moldName": "Unadorned Leather Gloves",
+     "gems": "3x Crushed Topaz"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31095,
+     "finishedName": "Fist of the Grand Master",
+     "moldId": 24948,
+     "moldName": "Eroded Leather Gloves",
+     "gems": "3x Crushed Topaz"
+    }
+   ],
+   "Chest": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25441,
+     "finishedName": "Golden Star Chest Wraps",
+     "moldId": 24914,
+     "moldName": "Ancient Leather Tunic",
+     "gems": "3x Flawless Diamond"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31190,
+     "finishedName": "White Lotus Chest Wraps",
+     "moldId": 24970,
+     "moldName": "Unadorned Leather Tunic",
+     "gems": "3x Flawless Diamond"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31092,
+     "finishedName": "Grand Master's Chest Wraps",
+     "moldId": 24942,
+     "moldName": "Eroded Leather Tunic",
+     "gems": "3x Flawless Diamond"
+    }
+   ],
+   "Legs": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25445,
+     "finishedName": "Golden Star Pants",
+     "moldId": 24915,
+     "moldName": "Ancient Leather Leggings",
+     "gems": "3x Flawed Sea Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31194,
+     "finishedName": "White Lotus Pants",
+     "moldId": 24971,
+     "moldName": "Unadorned Leather Leggings",
+     "gems": "3x Flawed Sea Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31096,
+     "finishedName": "Grand Master's Leg Wraps",
+     "moldId": 24943,
+     "moldName": "Eroded Leather Leggings",
+     "gems": "3x Flawed Sea Sapphire"
+    }
+   ],
+   "Feet": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25446,
+     "finishedName": "Golden Star Slippers",
+     "moldId": 24917,
+     "moldName": "Ancient Leather Boots",
+     "gems": "3x Crushed Black Marble"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31195,
+     "finishedName": "White Lotus Slippers",
+     "moldId": 24973,
+     "moldName": "Unadorned Leather Boots",
+     "gems": "3x Crushed Black Marble"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31097,
+     "finishedName": "Grand Master's Slippers",
+     "moldId": 24945,
+     "moldName": "Eroded Leather Boots",
+     "gems": "3x Crushed Black Marble"
+    }
+   ]
+  }
+ },
+ "Shaman": {
+  "slots": {
+   "Head": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25356,
+     "finishedName": "Spirit Caller's Helm",
+     "moldId": 24912,
+     "moldName": "Ancient Tarnished Chain Coif",
+     "gems": "3x Crushed Onyx Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31105,
+     "finishedName": "Wolf Caller's Helm",
+     "moldId": 24968,
+     "moldName": "Unadorned Chain Coif",
+     "gems": "3x Crushed Onyx Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31007,
+     "finishedName": "Rune Crafter's Helm",
+     "moldId": 24940,
+     "moldName": "Corroded Chain Coif",
+     "gems": "3x Crushed Onyx Sapphire"
+    }
+   ],
+   "Arms": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25358,
+     "finishedName": "Spirit Caller's Vambraces",
+     "moldId": 24909,
+     "moldName": "Ancient Tarnished Chain Sleeves",
+     "gems": "3x Jaundice Gem"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31107,
+     "finishedName": "Wolf Caller's Vambraces",
+     "moldId": 24965,
+     "moldName": "Unadorned Chain Sleeves",
+     "gems": "3x Jaundice Gem"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31009,
+     "finishedName": "Rune Crafter's Vambraces",
+     "moldId": 24937,
+     "moldName": "Corroded Chain Sleeves",
+     "gems": "3x Jaundice Gem"
+    }
+   ],
+   "Wrist": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25359,
+     "finishedName": "Spirit Caller's Bracer",
+     "moldId": 24911,
+     "moldName": "Ancient Tarnished Chain Bracer",
+     "gems": "3x Crushed Opal"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31108,
+     "finishedName": "Wolf Caller's Bracer",
+     "moldId": 24967,
+     "moldName": "Unadorned Chain Bracer",
+     "gems": "3x Crushed Opal"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31010,
+     "finishedName": "Rune Crafter's Bracer",
+     "moldId": 24939,
+     "moldName": "Corroded Chain Bracer",
+     "gems": "3x Crushed Opal"
+    }
+   ],
+   "Hands": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25360,
+     "finishedName": "Spirit Caller's Gauntlets",
+     "moldId": 24913,
+     "moldName": "Ancient Tarnished Chain Gauntlets",
+     "gems": "3x Crushed Lava Ruby"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31109,
+     "finishedName": "Wolf Caller's Gauntlets",
+     "moldId": 24969,
+     "moldName": "Unadorned Chain Gauntlets",
+     "gems": "3x Crushed Lava Ruby"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31011,
+     "finishedName": "Rune Crafter's Gauntlets",
+     "moldId": 24941,
+     "moldName": "Corroded Chain Gauntlets",
+     "gems": "3x Crushed Lava Ruby"
+    }
+   ],
+   "Chest": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25357,
+     "finishedName": "Spirit Caller's Breastplate",
+     "moldId": 24907,
+     "moldName": "Ancient Tarnished Chain Tunic",
+     "gems": "3x Black Marble"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31106,
+     "finishedName": "Wolf Caller's Breastplate",
+     "moldId": 24963,
+     "moldName": "Unadorned Chain Tunic",
+     "gems": "3x Black Marble"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31008,
+     "finishedName": "Rune Crafter's Breastplate",
+     "moldId": 24935,
+     "moldName": "Corroded Chain Tunic",
+     "gems": "3x Black Marble"
+    }
+   ],
+   "Legs": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25361,
+     "finishedName": "Spirit Caller's Greaves",
+     "moldId": 24908,
+     "moldName": "Ancient Tarnished Chain Leggings",
+     "gems": "3x Chipped Onyx Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31110,
+     "finishedName": "Wolf Caller's Greaves",
+     "moldId": 24964,
+     "moldName": "Unadorned Chain Leggings",
+     "gems": "3x Chipped Onyx Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31012,
+     "finishedName": "Rune Crafter's Greaves",
+     "moldId": 24936,
+     "moldName": "Corroded Chain Leggings",
+     "gems": "3x Chipped Onyx Sapphire"
+    }
+   ],
+   "Feet": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25362,
+     "finishedName": "Spirit Caller's Boots",
+     "moldId": 24910,
+     "moldName": "Ancient Tarnished Chain Boots",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31111,
+     "finishedName": "Wolf Caller's Boots",
+     "moldId": 24966,
+     "moldName": "Unadorned Chain Boots",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31013,
+     "finishedName": "Rune Crafter's Boots",
+     "moldId": 24938,
+     "moldName": "Corroded Chain Boots",
+     "gems": "3x Crushed Flame Emerald"
+    }
+   ]
+  }
+ },
+ "Druid": {
+  "slots": {
+   "Head": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25398,
+     "finishedName": "Nature Walker's Circlet",
+     "moldId": 24919,
+     "moldName": "Ancient Leather Cap",
+     "gems": "3x Crushed Onyx Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31147,
+     "finishedName": "Woven Grass Headband",
+     "moldId": 24975,
+     "moldName": "Unadorned Leather Cap",
+     "gems": "3x Crushed Onyx Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31049,
+     "finishedName": "Rowyl's Circlet of Nature",
+     "moldId": 24947,
+     "moldName": "Eroded Leather Cap",
+     "gems": "3x Crushed Onyx Sapphire"
+    }
+   ],
+   "Arms": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25400,
+     "finishedName": "Nature Walker's Vambraces",
+     "moldId": 24916,
+     "moldName": "Ancient Leather Sleeves",
+     "gems": "3x Jaundice Gem"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31149,
+     "finishedName": "Woven Grass Vambraces",
+     "moldId": 24972,
+     "moldName": "Unadorned Leather Sleeves",
+     "gems": "3x Jaundice Gem"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31051,
+     "finishedName": "Rowyl's Vambraces of Nature",
+     "moldId": 24944,
+     "moldName": "Eroded Leather Sleeves",
+     "gems": "3x Jaundice Gem"
+    }
+   ],
+   "Wrist": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25401,
+     "finishedName": "Nature Walker's Bracer",
+     "moldId": 24918,
+     "moldName": "Ancient Leather Bracelet",
+     "gems": "3x Crushed Opal"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31150,
+     "finishedName": "Woven Grass Bracelet",
+     "moldId": 24974,
+     "moldName": "Unadorned Leather Bracelet",
+     "gems": "3x Crushed Opal"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31052,
+     "finishedName": "Rowyl's Bracer of Nature",
+     "moldId": 24946,
+     "moldName": "Eroded Leather Bracelet",
+     "gems": "3x Crushed Opal"
+    }
+   ],
+   "Hands": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25402,
+     "finishedName": "Nature Walker's Gauntlets",
+     "moldId": 24920,
+     "moldName": "Ancient Leather Gloves",
+     "gems": "3x Crushed Lava Ruby"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31151,
+     "finishedName": "Woven Grass Gauntlets",
+     "moldId": 24976,
+     "moldName": "Unadorned Leather Gloves",
+     "gems": "3x Crushed Lava Ruby"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31053,
+     "finishedName": "Rowyl's Gauntlets of Nature",
+     "moldId": 24948,
+     "moldName": "Eroded Leather Gloves",
+     "gems": "3x Crushed Lava Ruby"
+    }
+   ],
+   "Chest": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25399,
+     "finishedName": "Nature Walker's Chestguard",
+     "moldId": 24914,
+     "moldName": "Ancient Leather Tunic",
+     "gems": "3x Black Marble"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31148,
+     "finishedName": "Woven Grass Chestguard",
+     "moldId": 24970,
+     "moldName": "Unadorned Leather Tunic",
+     "gems": "3x Black Marble"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31050,
+     "finishedName": "Rowyl's Chestguard of Nature",
+     "moldId": 24942,
+     "moldName": "Eroded Leather Tunic",
+     "gems": "3x Black Marble"
+    }
+   ],
+   "Legs": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25403,
+     "finishedName": "Nature Walker's Greaves",
+     "moldId": 24915,
+     "moldName": "Ancient Leather Leggings",
+     "gems": "3x Chipped Onyx Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31152,
+     "finishedName": "Woven Grass Greaves",
+     "moldId": 24971,
+     "moldName": "Unadorned Leather Leggings",
+     "gems": "3x Chipped Onyx Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31054,
+     "finishedName": "Rowyl's Greaves of Nature",
+     "moldId": 24943,
+     "moldName": "Eroded Leather Leggings",
+     "gems": "3x Chipped Onyx Sapphire"
+    }
+   ],
+   "Feet": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25404,
+     "finishedName": "Nature Walker's Boots",
+     "moldId": 24917,
+     "moldName": "Ancient Leather Boots",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31153,
+     "finishedName": "Woven Grass Boots",
+     "moldId": 24973,
+     "moldName": "Unadorned Leather Boots",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31055,
+     "finishedName": "Rowyl's Boots of Nature",
+     "moldId": 24945,
+     "moldName": "Eroded Leather Boots",
+     "gems": "3x Crushed Flame Emerald"
+    }
+   ]
+  }
+ },
+ "Warrior": {
+  "slots": {
+   "Head": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25433,
+     "finishedName": "Warlord's Crown",
+     "moldId": 24905,
+     "moldName": "Ancient Tarnished Plate Helmet",
+     "gems": "3x Crushed Coral"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31182,
+     "finishedName": "Crown of the Myrmidon",
+     "moldId": 24961,
+     "moldName": "Unadorned Plate Helmet",
+     "gems": "3x Crushed Coral"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31084,
+     "finishedName": "Champion's Crown",
+     "moldId": 24933,
+     "moldName": "Corroded Plate Helmet",
+     "gems": "3x Crushed Coral"
+    }
+   ],
+   "Arms": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25435,
+     "finishedName": "Warlord's Vambraces",
+     "moldId": 24902,
+     "moldName": "Ancient Tarnished Vambraces",
+     "gems": "3x Flawed Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31184,
+     "finishedName": "Vambraces of the Myrmidon",
+     "moldId": 24958,
+     "moldName": "Unadorned Plate Vambraces",
+     "gems": "3x Flawed Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31086,
+     "finishedName": "Champion's Vambraces",
+     "moldId": 24930,
+     "moldName": "Corroded Plate Vambraces",
+     "gems": "3x Flawed Emerald"
+    }
+   ],
+   "Wrist": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25436,
+     "finishedName": "Warlord's Bracer",
+     "moldId": 24904,
+     "moldName": "Ancient Tarnished Plate Bracelet",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31185,
+     "finishedName": "Bracer of the Myrmidon",
+     "moldId": 24960,
+     "moldName": "Unadorned Plate Bracer",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31087,
+     "finishedName": "Champion's Bracer",
+     "moldId": 24932,
+     "moldName": "Corroded Plate Bracer",
+     "gems": "3x Crushed Flame Emerald"
+    }
+   ],
+   "Hands": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25437,
+     "finishedName": "Warlord's Gauntlets",
+     "moldId": 24906,
+     "moldName": "Ancient Tarnished Plate Gauntlets",
+     "gems": "3x Crushed Topaz"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31186,
+     "finishedName": "Gauntlets of the Myrmidon",
+     "moldId": 24962,
+     "moldName": "Unadorned Plate Gauntlets",
+     "gems": "3x Crushed Topaz"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31088,
+     "finishedName": "Champion's Gauntlets",
+     "moldId": 24934,
+     "moldName": "Corroded Plate Gauntlets",
+     "gems": "3x Crushed Topaz"
+    }
+   ],
+   "Chest": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25434,
+     "finishedName": "Warlord's Breastplate",
+     "moldId": 24900,
+     "moldName": "Ancient Tarnished Breastplate",
+     "gems": "3x Flawless Diamond"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31183,
+     "finishedName": "Breastplate of the Myrmidon",
+     "moldId": 24956,
+     "moldName": "Unadorned Breastplate",
+     "gems": "3x Flawless Diamond"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31085,
+     "finishedName": "Champion's Breastplate",
+     "moldId": 24928,
+     "moldName": "Corroded Breastplate",
+     "gems": "3x Flawless Diamond"
+    }
+   ],
+   "Legs": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25438,
+     "finishedName": "Warlord's Greaves",
+     "moldId": 24901,
+     "moldName": "Ancient Tarnished Greaves",
+     "gems": "3x Flawed Sea Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31187,
+     "finishedName": "Greaves of the Myrmidon",
+     "moldId": 24957,
+     "moldName": "Unadorned Plate Greaves",
+     "gems": "3x Flawed Sea Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31089,
+     "finishedName": "Champion's Greaves",
+     "moldId": 24929,
+     "moldName": "Corroded Plate Greaves",
+     "gems": "3x Flawed Sea Sapphire"
+    }
+   ],
+   "Feet": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25439,
+     "finishedName": "Warlord's Boots",
+     "moldId": 24903,
+     "moldName": "Ancient Tarnished Plate Boots",
+     "gems": "3x Crushed Black Marble"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31188,
+     "finishedName": "Boots of the Myrmidon",
+     "moldId": 24959,
+     "moldName": "Unadorned Plate Boots",
+     "gems": "3x Crushed Black Marble"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31090,
+     "finishedName": "Champion's Boots",
+     "moldId": 24931,
+     "moldName": "Corroded Plate Boots",
+     "gems": "3x Crushed Black Marble"
+    }
+   ]
+  }
+ },
+ "Cleric": {
+  "slots": {
+   "Head": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25391,
+     "finishedName": "Templar's Crown",
+     "moldId": 24905,
+     "moldName": "Ancient Tarnished Plate Helmet",
+     "gems": "3x Crushed Onyx Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31140,
+     "finishedName": "Akkirus' Crown of the Risen",
+     "moldId": 24961,
+     "moldName": "Unadorned Plate Helmet",
+     "gems": "3x Crushed Onyx Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31042,
+     "finishedName": "Crown of Forbidden Rites",
+     "moldId": 24933,
+     "moldName": "Corroded Plate Helmet",
+     "gems": "3x Crushed Onyx Sapphire"
+    }
+   ],
+   "Arms": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25393,
+     "finishedName": "Templar's Vambraces",
+     "moldId": 24902,
+     "moldName": "Ancient Tarnished Vambraces",
+     "gems": "3x Jaundice Gem"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31142,
+     "finishedName": "Akkirus' Vambraces of the Risen",
+     "moldId": 24958,
+     "moldName": "Unadorned Plate Vambraces",
+     "gems": "3x Jaundice Gem"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31044,
+     "finishedName": "Vambraces of Forbidden Rites",
+     "moldId": 24930,
+     "moldName": "Corroded Plate Vambraces",
+     "gems": "3x Jaundice Gem"
+    }
+   ],
+   "Wrist": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25394,
+     "finishedName": "Templar's Bracer",
+     "moldId": 24904,
+     "moldName": "Ancient Tarnished Plate Bracelet",
+     "gems": "3x Crushed Opal"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31143,
+     "finishedName": "Akkirus' Bracelet of the Risen",
+     "moldId": 24960,
+     "moldName": "Unadorned Plate Bracer",
+     "gems": "3x Crushed Opal"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31045,
+     "finishedName": "Bracers of Forbidden Rites",
+     "moldId": 24932,
+     "moldName": "Corroded Plate Bracer",
+     "gems": "3x Crushed Opal"
+    }
+   ],
+   "Hands": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25395,
+     "finishedName": "Templar's Gauntlets",
+     "moldId": 24906,
+     "moldName": "Ancient Tarnished Plate Gauntlets",
+     "gems": "3x Crushed Lava Ruby"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31144,
+     "finishedName": "Akkirus' Gauntlets of the Risen",
+     "moldId": 24962,
+     "moldName": "Unadorned Plate Gauntlets",
+     "gems": "3x Crushed Lava Ruby"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31046,
+     "finishedName": "Gauntlets of Forbidden Rites",
+     "moldId": 24934,
+     "moldName": "Corroded Plate Gauntlets",
+     "gems": "3x Crushed Lava Ruby"
+    }
+   ],
+   "Chest": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25392,
+     "finishedName": "Templar's Chestplate",
+     "moldId": 24900,
+     "moldName": "Ancient Tarnished Breastplate",
+     "gems": "3x Black Marble"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31141,
+     "finishedName": "Akkirus' Chestplate of the Risen",
+     "moldId": 24956,
+     "moldName": "Unadorned Breastplate",
+     "gems": "3x Black Marble"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31043,
+     "finishedName": "Breastplate of Forbidden Rites",
+     "moldId": 24928,
+     "moldName": "Corroded Breastplate",
+     "gems": "3x Black Marble"
+    }
+   ],
+   "Legs": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25396,
+     "finishedName": "Templar's Leggings",
+     "moldId": 24901,
+     "moldName": "Ancient Tarnished Greaves",
+     "gems": "3x Chipped Onyx Sapphire"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31145,
+     "finishedName": "Akkirus' Greaves of the Risen",
+     "moldId": 24957,
+     "moldName": "Unadorned Plate Greaves",
+     "gems": "3x Chipped Onyx Sapphire"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31047,
+     "finishedName": "Greaves of Forbidden Rites",
+     "moldId": 24929,
+     "moldName": "Corroded Plate Greaves",
+     "gems": "3x Chipped Onyx Sapphire"
+    }
+   ],
+   "Feet": [
+    {
+     "tier": "Ancient (Kael)",
+     "finishedId": 25397,
+     "finishedName": "Templar's Boots",
+     "moldId": 24903,
+     "moldName": "Ancient Tarnished Plate Boots",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Unadorned (Skyshrine)",
+     "finishedId": 31146,
+     "finishedName": "Akkirus' Boots of the Risen",
+     "moldId": 24959,
+     "moldName": "Unadorned Plate Boots",
+     "gems": "3x Crushed Flame Emerald"
+    },
+    {
+     "tier": "Corroded (Thurgadin)",
+     "finishedId": 31048,
+     "finishedName": "Boots of Forbidden Rites",
+     "moldId": 24931,
+     "moldName": "Corroded Plate Boots",
+     "gems": "3x Crushed Flame Emerald"
+    }
+   ]
+  }
+ }
+}

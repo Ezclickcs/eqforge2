@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setup — EQ Forge 2.0</title>
+  <meta name="description" content="EQ Forge setup: find your EverQuest and MacroQuest folders, install the in-game addon, and check that every in-game feed is arriving.">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* Scoped to this page on purpose - Setup is the one screen that has to render
+       correctly even when everything else is misconfigured, so it owns its layout
+       instead of depending on the dashboard's. */
+    .su-main { max-width: 1080px; margin: 0 auto; padding: 18px 20px 60px; }
+    .su-card { background: var(--surface); border: 1px solid var(--border);
+               border-radius: var(--radius); padding: 18px 20px; margin-bottom: 18px;
+               box-shadow: var(--shadow); }
+    .su-card h2 { margin: 0 0 4px; font-size: 1.05rem; }
+    .su-card .hint { color: var(--muted); font-size: .85rem; display: block; margin-bottom: 14px; }
+    .su-banner { border-radius: var(--radius); padding: 14px 18px; margin-bottom: 18px;
+                 border: 1px solid var(--border); background: var(--surface-2); font-size: .95rem; }
+    .su-banner.ok   { border-color: var(--accent); background: rgba(34,197,94,.09); }
+    .su-banner.warn { border-color: var(--warn);   background: rgba(245,158,11,.09); }
+    .su-banner.bad  { border-color: var(--danger); background: rgba(248,113,113,.09); }
+    .su-banner strong { display: block; margin-bottom: 4px; font-size: 1rem; }
+    .su-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px 14px;
+              align-items: start; margin-bottom: 16px; }
+    .su-row > label { color: var(--muted); font-size: .88rem; padding-top: 9px; }
+    .su-field { display: flex; gap: 8px; flex-wrap: wrap; }
+    .su-field input[type=text] { flex: 1 1 380px; min-width: 260px; font-family: var(--font-mono);
+                                 font-size: .85rem; padding: 8px 10px; border-radius: var(--radius-sm);
+                                 border: 1px solid var(--border-strong); background: var(--bg);
+                                 color: var(--text); }
+    .su-note { grid-column: 2; margin-top: -8px; font-size: .82rem; color: var(--muted); }
+    .su-tag { display: inline-block; font-size: .72rem; text-transform: uppercase;
+              letter-spacing: .04em; padding: 2px 7px; border-radius: 99px;
+              border: 1px solid var(--border-strong); color: var(--muted); }
+    .su-tag.good { border-color: var(--accent); color: var(--accent); }
+    .su-tag.warn { border-color: var(--warn);   color: var(--warn); }
+    .su-tag.bad  { border-color: var(--danger); color: var(--danger); }
+    .su-list { list-style: none; margin: 0; padding: 0; }
+    .su-list li { display: flex; gap: 10px; align-items: baseline; padding: 7px 0;
+                  border-bottom: 1px solid var(--border); font-size: .9rem; }
+    .su-list li:last-child { border-bottom: 0; }
+    .su-list .su-what { flex: 1 1 auto; }
+    .su-list .su-why { color: var(--dim); font-size: .82rem; }
+    .su-path { font-family: var(--font-mono); font-size: .82rem; color: var(--info);
+               word-break: break-all; }
+    .su-pre { font-family: var(--font-mono); font-size: .82rem; background: var(--bg);
+              border: 1px solid var(--border); border-radius: var(--radius-sm);
+              padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 8px 0; }
+    .su-toggles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                  gap: 10px 20px; margin-bottom: 14px; }
+    .su-toggle { display: flex; gap: 9px; align-items: flex-start; font-size: .9rem; }
+    .su-toggle input { margin-top: 3px; }
+    .su-toggle span small { display: block; color: var(--dim); font-size: .8rem; }
+    .su-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .su-msg { font-size: .85rem; color: var(--muted); }
+    .su-msg.good { color: var(--accent); }
+    .su-msg.bad  { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="logo">Setup <span class="ver-badge">EQ&nbsp;Forge</span></span>
+      <span class="tagline">where EverQuest and MacroQuest live, and what talks to what</span>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn-ghost btn-sm" href="index.html">← Macro Builder</a>
+      <a class="btn btn-ghost btn-sm" href="mychars.html">My Characters</a>
+    </div>
+  </header>
+
+  <main class="su-main">
+
+    <div id="suBanner" class="su-banner">Checking…</div>
+
+    <!-- ============ FOLDERS ============ -->
+    <section class="su-card">
+      <h2>Folders</h2>
+      <span class="hint">
+        Found automatically on most installs. Only type a path if the detected one is wrong —
+        an empty box means "detect it for me".
+      </span>
+
+      <div class="su-row">
+        <label for="suEq">EverQuest folder</label>
+        <div class="su-field">
+          <input type="text" id="suEq" spellcheck="false" placeholder="auto-detect">
+          <button class="btn btn-sm" id="suEqClear" type="button">Auto-detect</button>
+        </div>
+        <div class="su-note" id="suEqNote"></div>
+      </div>
+
+      <div class="su-row">
+        <label for="suMq">MacroQuest <code>config</code> folder</label>
+        <div class="su-field">
+          <input type="text" id="suMq" spellcheck="false" placeholder="auto-detect">
+          <button class="btn btn-sm" id="suMqClear" type="button">Auto-detect</button>
+        </div>
+        <div class="su-note" id="suMqNote"></div>
+      </div>
+
+      <div class="su-actions">
+        <button class="btn btn-accent" id="suSave" type="button">Save folders</button>
+        <span class="su-msg" id="suSaveMsg"></span>
+      </div>
+    </section>
+
+    <!-- ============ ADDON ============ -->
+    <section class="su-card">
+      <h2>In-game addon <span class="su-tag" id="suAddonTag">checking…</span></h2>
+      <span class="hint">
+        Optional, and MacroQuest only. It is what exports your roster, your expedition
+        lockouts and your inventory without you typing anything.
+      </span>
+
+      <div id="suAddonInstall">
+        <p style="font-size:.9rem;margin:0 0 6px">Copy the <code>extras\eqforge</code> folder from this
+          package into MacroQuest's <code>lua</code> folder, so you end up with:</p>
+        <div class="su-pre" id="suAddonPath">…</div>
+        <p style="font-size:.9rem;margin:0 0 6px">Then, in game:</p>
+        <div class="su-pre">/lua run eqforge</div>
+        <p style="font-size:.85rem;color:var(--muted);margin:0">
+          Running the whole crew? Broadcast it: <code>/dgae /lua run eqforge</code>
+          (MQ2DanNet) or <code>/bcaa //lua run eqforge</code> (EQBC).
+        </p>
+      </div>
+
+      <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+
+      <h3 style="font-size:.95rem;margin:0 0 4px">What it does automatically</h3>
+      <span class="hint">
+        Saved to the addon's own settings file. It reads them when it starts, so restart it
+        in game (<code>/eqf stop</code> then <code>/lua run eqforge</code>) after saving.
+      </span>
+
+      <div class="su-toggles">
+        <label class="su-toggle"><input type="checkbox" id="suCamp">
+          <span>Export when I <code>/camp</code>
+            <small>Roster, lockouts and inventory, every time you camp out. The main one.</small></span></label>
+        <label class="su-toggle"><input type="checkbox" id="suLogin">
+          <span>Export after logging in
+            <small>Roster + lockouts a few seconds after entering the world.</small></span></label>
+        <label class="su-toggle"><input type="checkbox" id="suLoginDump">
+          <span>…and dump inventory too
+            <small>Off by default: login is when inventory is still streaming in.</small></span></label>
+        <label class="su-toggle"><input type="checkbox" id="suZone">
+          <span>Export on every zone
+            <small>Roster + lockouts only. Noisy; most people leave this off.</small></span></label>
+        <label class="su-toggle"><input type="checkbox" id="suQuiet">
+          <span>Quiet mode
+            <small>Stop the routine "exported X" chatter in your chat window.</small></span></label>
+        <label class="su-toggle"><span>Full export on a timer
+            <small>Minutes between automatic full exports. 0 = off.</small>
+            <input type="number" id="suEvery" min="0" max="720" step="5" value="0"
+                   style="width:90px;margin-top:6px;padding:6px 8px;border-radius:var(--radius-sm);
+                          border:1px solid var(--border-strong);background:var(--bg);color:var(--text)">
+          </span></label>
+      </div>
+
+      <div class="su-actions">
+        <button class="btn btn-accent" id="suAddonSave" type="button">Save addon settings</button>
+        <span class="su-msg" id="suAddonMsg"></span>
+      </div>
+    </section>
+
+    <!-- ============ FEEDS ============ -->
+    <section class="su-card">
+      <h2>What's arriving from the game</h2>
+      <span class="hint">
+        Counts and freshness of the files EQ Forge reads. "Never" here is why a feature
+        would look empty.
+      </span>
+      <ul class="su-list" id="suFeeds"></ul>
+    </section>
+
+    <!-- ============ OPTIONAL ============ -->
+    <section class="su-card">
+      <h2>Optional in-game tools</h2>
+      <span class="hint">
+        None of these are required. They only add in-game delivery for gear plans —
+        everything else in EQ Forge works without any of them.
+      </span>
+      <ul class="su-list" id="suTools"></ul>
+    </section>
+
+  </main>
+
+  <script src="setup.js"></script>
+</body>
+</html>

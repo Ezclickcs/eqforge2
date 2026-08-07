@@ -1,0 +1,64 @@
+{
+  "_comment": "Sample roster. NOT loaded automatically - a fresh install starts empty and you import your own (My Characters -> Import). Load this on purpose from the Import tab if you want to see the tabs populated before you have any data of your own. Every name here is a placeholder.",
+  "accounts": [
+    {"alias": "Acct1", "account_number": "1", "autologin_group": "main", "launch_order": 1,
+     "perks": [], "notes": "Main account"},
+    {"alias": "Acct2", "account_number": "2", "autologin_group": "main", "launch_order": 2, "perks": []},
+    {"alias": "Acct3", "account_number": "3", "autologin_group": "main", "launch_order": 3, "perks": []},
+    {"alias": "Acct4", "account_number": "4", "autologin_group": "main", "launch_order": 4, "perks": []},
+    {"alias": "Acct5", "account_number": "5", "autologin_group": "main", "launch_order": 5, "perks": []},
+    {"alias": "Acct6", "account_number": "6", "autologin_group": "main", "launch_order": 6, "perks": []}
+  ],
+  "characters": [
+    {"name": "SampleMonk", "account": "Acct1", "class_name": "Monk", "level": 60,
+     "main_role": "puller", "group_tags": "core", "automation_status": "tested",
+     "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleEnchanter", "account": "Acct1", "class_name": "Enchanter", "level": 60,
+     "main_role": "support", "group_tags": "core", "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleDruid", "account": "Acct1", "class_name": "Druid",
+     "main_role": "healer", "notes": "Placeholder - level left blank on purpose, shows as 'unknown'"},
+    {"name": "SampleShaman", "account": "Acct2", "class_name": "Shaman", "level": 60,
+     "main_role": "healer", "group_tags": "core", "automation_status": "tested",
+     "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleCleric", "account": "Acct2", "class_name": "Cleric", "level": 60,
+     "main_role": "healer", "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleWarrior", "account": "Acct3", "class_name": "Warrior", "level": 60,
+     "main_role": "tank", "group_tags": "core", "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleBard", "account": "Acct4", "class_name": "Bard", "level": 60,
+     "main_role": "support", "group_tags": "core", "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleChanter", "account": "Acct5", "class_name": "Enchanter", "level": 60,
+     "main_role": "support", "group_tags": "core", "notes": "Placeholder - rename or delete me"},
+    {"name": "SampleWizard", "account": "Acct6", "class_name": "Wizard", "level": 60,
+     "main_role": "dps", "notes": "Placeholder - rename or delete me"}
+  ],
+  "unlocks": [
+    {"character": "SampleMonk", "name": "Sebilis Key", "expansion": "Kunark", "category": "key",
+     "priority": "high", "status": "Complete"},
+    {"character": "SampleMonk", "name": "Veeshan's Peak Access", "expansion": "Kunark",
+     "category": "access", "priority": "high", "status": "In Progress"},
+    {"character": "SampleMonk", "name": "MQ profile tested", "category": "automation",
+     "priority": "critical", "status": "Complete"},
+    {"character": "SampleShaman", "name": "Port-bot whitelist", "category": "access",
+     "priority": "high", "status": "Complete"},
+    {"character": "SampleWarrior", "name": "OT Hammer", "expansion": "Kunark", "category": "clicky",
+     "priority": "normal", "status": "Missing"},
+    {"character": "SampleWarrior", "name": "Sleeper's Tomb Key", "expansion": "Velious",
+     "category": "key", "priority": "high", "status": "Missing"},
+    {"character": "SampleEnchanter", "name": "Emergency pause tested", "category": "automation",
+     "priority": "critical", "status": "Unknown"}
+  ],
+  "raids": ["Kael (King Tormax)", "Yelinak", "Tunare", "Sleeper's Tomb"],
+  "lockouts": [
+    {"character": "SampleMonk", "raid": "Kael (King Tormax)"},
+    {"character": "SampleShaman", "raid": "Kael (King Tormax)"}
+  ],
+  "compositions": [
+    {"name": "Core Six", "notes": "Daily driver",
+     "slots": ["SampleWarrior", "SampleShaman", "SampleMonk", "SampleBard", "SampleChanter", "SampleWizard"]},
+    {"name": "Raid Six", "notes": "Fill me in", "slots": []},
+    {"name": "Power-Level Group", "notes": "Fill me in", "slots": []},
+    {"name": "Melee Group", "notes": "Fill me in", "slots": []},
+    {"name": "Named Farming Group", "notes": "Fill me in", "slots": []},
+    {"name": "Lockout Team", "notes": "Alt run while mains are saved", "slots": []}
+  ]
+}

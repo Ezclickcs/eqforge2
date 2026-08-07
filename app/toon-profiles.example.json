@@ -1,0 +1,26 @@
+{
+  "_comment": "Optional. Copy to toon-profiles.json and fill in your own roster. The app works without it. role: main | box | seller | bank. gear_review: include this toon in the Upgrades tab.",
+  "YourMain": {
+    "server": "Frostreaver",
+    "level": 60,
+    "race": "Iksar",
+    "class": "Monk",
+    "role": "main",
+    "gear_review": true
+  },
+  "YourBox": {
+    "server": "Frostreaver",
+    "level": 60,
+    "race": "Iksar",
+    "class": "Shaman",
+    "role": "box",
+    "gear_review": true
+  },
+  "YourMule": {
+    "server": "Frostreaver",
+    "level": 0,
+    "class": "",
+    "role": "bank",
+    "gear_review": false
+  }
+}

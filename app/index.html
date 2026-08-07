@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EQ Forge 2.0 — multi-toon EverQuest auction macro builder</title>
+  <meta name="description" content="Load inventory from all your EQ toons, pull live TLP-Auctions prices, and generate a WTS macro of clickable item links. Runs in your browser; nothing leaves your machine.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="logo">EQ&nbsp;Forge <span class="ver-badge">2.0</span></span>
+      <span class="tagline">multi-toon auction builder · <span id="appVersion"></span></span>
+    </div>
+    <div class="header-stats">
+      <span class="stat" id="dbCount">DB: loading…</span>
+      <span class="stat" id="kronoInfo">krono —</span>
+      <button id="syncKronoBtn" class="btn btn-ghost btn-sm" type="button" title="Refresh the live krono rate (1-day average)">Sync</button>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn-ghost btn-sm" href="https://github.com/wangel/EQ_Auction_Forge" target="_blank" rel="noopener" title="Fork of EQ Auction Forge by wangel — free &amp; open (AGPLv3)">Based on EQ&nbsp;Auction&nbsp;Forge</a>
+      <button id="helpBtn" class="btn btn-ghost btn-sm" type="button">Help</button>
+    </div>
+  </header>
+
+  <nav class="viewtabs">
+    <button id="tabBuilder" class="viewtab active" type="button">Macro Builder</button>
+    <button id="tabMonitor" class="viewtab" type="button">Live Monitor</button>
+    <a class="viewtab" href="mychars.html" title="Multibox roster: accounts, comps, keys, optimizer">My Characters</a>
+    <a class="viewtab" href="setup.html" title="Find your EverQuest and MacroQuest folders, install the in-game addon">⚙ Setup</a>
+  </nav>
+
+  <main>
+    <div id="builderView">
+
+      <!-- Load strip -->
+      <section class="card load-strip">
+        <div class="load-block">
+          <div class="load-head">
+            <span class="step-num">1</span>
+            <strong>Load inventory dumps</strong>
+            <span class="hint">In EQ: <code>/outputfile inventory</code> on each toon, then pick the files — they merge into one list.</span>
+          </div>
+          <div class="load-controls">
+            <button id="reloadDumps" class="btn btn-primary" type="button" title="Re-read every *-Inventory.txt straight from your EQ folder — run this right after /outputfile inventory in game">⟳ Reload dumps from EQ</button>
+            <label for="invFile" class="btn btn-ghost">Choose dumps…</label>
+            <input type="file" id="invFile" accept=".txt,.csv,text/plain" multiple hidden>
+            <span class="hint" id="invStatus">no toons loaded</span>
+            <span class="load-db">
+              <span class="hint" id="dbStatus">item DB loading…</span>
+              <button id="reloadDb" class="btn btn-ghost btn-sm" type="button" title="Clear the local cache and re-fetch the bundled item DB">↻ Reload DB</button>
+            </span>
+          </div>
+          <div id="toonChips" class="toon-chips"></div>
+        </div>
+      </section>
+
+      <!-- Two-pane workspace -->
+      <div class="workspace">
+
+        <!-- LEFT: inventory -->
+        <section class="card pane">
+          <div class="pane-head">
+            <span class="step-num">2</span>
+            <strong>Inventory</strong>
+            <button id="invExpandBtn" class="btn btn-ghost btn-sm" type="button"
+              title="Fold the sell list away and give the item browser the full window — more room for stat columns">⤢ Expand</button>
+            <span class="pill" id="invCount">0 items</span>
+          </div>
+
+          <div class="filters">
+            <input type="search" id="invSearch" class="input" placeholder="Search items…">
+            <select id="filterToon" class="input select"><option value="">All toons</option></select>
+            <select id="filterType" class="input select">
+              <option value="">All types</option>
+              <option value="gear">Gear</option>
+              <option value="spell">Spells / Songs</option>
+              <option value="tradeskill">Tradeskill / Gems</option>
+              <option value="food">Food / Drink</option>
+              <option value="container">Bags</option>
+              <option value="other">Other</option>
+            </select>
+            <span id="filterSlotWrap" class="slot-wrap" style="display:none">
+              <select id="filterSlot" class="input select">
+                <option value="">Any slot</option>
+              </select>
+            </span>
+            <span id="filterStatWrap" class="slot-wrap" style="display:none">
+              <select id="filterStat" class="input select" title="Show only gear that carries this stat">
+                <option value="">Any stat</option>
+                <optgroup label="Defense">
+                  <option value="ac">AC</option>
+                  <option value="hp">HP</option>
+                  <option value="mana">Mana</option>
+                  <option value="end">Endurance</option>
+                  <option value="regen">HP Regen</option>
+                  <option value="mregen">Mana Regen</option>
+                </optgroup>
+                <optgroup label="Offense">
+                  <option value="atk">Attack</option>
+                  <option value="haste">Haste</option>
+                  <option value="sdmg">Spell Dmg</option>
+                  <option value="heal">Heal Amt</option>
+                </optgroup>
+                <optgroup label="Attributes">
+                  <option value="str">STR</option>
+                  <option value="sta">STA</option>
+                  <option value="agi">AGI</option>
+                  <option value="dex">DEX</option>
+                  <option value="wis">WIS</option>
+                  <option value="int">INT</option>
+                  <option value="cha">CHA</option>
+                </optgroup>
+                <optgroup label="Resists">
+                  <option value="svf">Fire Resist</option>
+                  <option value="svc">Cold Resist</option>
+                  <option value="svm">Magic Resist</option>
+                  <option value="svd">Disease Resist</option>
+                  <option value="svp">Poison Resist</option>
+                </optgroup>
+                <optgroup label="Heroic">
+                  <option value="hstr">Heroic STR</option>
+                  <option value="hsta">Heroic STA</option>
+                  <option value="hagi">Heroic AGI</option>
+                  <option value="hdex">Heroic DEX</option>
+                  <option value="hwis">Heroic WIS</option>
+                  <option value="hint">Heroic INT</option>
+                  <option value="hcha">Heroic CHA</option>
+                </optgroup>
+              </select>
+              <input id="filterStatMin" class="input input-num" type="number" placeholder="min" min="0" step="1" title="Minimum value for the chosen stat (blank = any gear that has it)">
+            </span>
+            <span id="filterRaceWrap" class="slot-wrap" style="display:none">
+              <select id="filterRace" class="input select">
+                <option value="">Any race</option>
+              </select>
+            </span>
+            <span id="filterClassWrap" class="slot-wrap" style="display:none">
+              <select id="filterClass" class="input select">
+                <option value="">All classes</option>
+              </select>
+            </span>
+          </div>
+
+          <div class="loc-toggles" id="locToggles" role="group" aria-label="Show locations">
+            <label class="toggle"><input type="checkbox" data-loc="bags" checked> Bags</label>
+            <label class="toggle"><input type="checkbox" data-loc="equipped"> Worn</label>
+            <label class="toggle"><input type="checkbox" data-loc="bank"> Bank</label>
+            <label class="toggle"><input type="checkbox" data-loc="shared"> Shared</label>
+            <label class="toggle"><input type="checkbox" data-loc="keyring"> KeyRing</label>
+            <label class="toggle" title="Personal Tradeskill Depot — tradeskill mats only, but it stacks deep and most of it is sellable. Withdraw from the depot window."><input type="checkbox" data-loc="depot"> Depot</label>
+            <label class="toggle" title="Hoard storage (up to 125 slots). Retrieving from the Hoard is a manual search + Retrieve in game — there's no quick pull."><input type="checkbox" data-loc="hoard"> Hoard</label>
+          </div>
+
+          <div class="inv-colbar">
+            <div class="colpick-wrap">
+              <button id="invColsBtn" class="btn btn-ghost btn-sm" type="button"
+                title="Choose which stats show as columns — no hovering required">▦ Columns</button>
+              <div id="invColsMenu" class="colpick-menu" hidden>
+                <div class="colpick-presets">
+                  <button class="btn btn-ghost btn-xs" type="button" data-preset="melee">Melee</button>
+                  <button class="btn btn-ghost btn-xs" type="button" data-preset="caster">Caster</button>
+                  <button class="btn btn-ghost btn-xs" type="button" data-preset="priest">Priest</button>
+                  <button class="btn btn-ghost btn-xs" type="button" data-preset="selling">Selling</button>
+                  <button class="btn btn-ghost btn-xs" type="button" data-preset="minimal">Minimal</button>
+                </div>
+                <div id="invColsList" class="colpick-list"></div>
+              </div>
+            </div>
+            <label class="cmp-wrap" title="Show, per item, whether it beats what this toon is WEARING in that slot">
+              <span class="hint">vs worn on</span>
+              <select id="invCompare" class="input select">
+                <option value="">— nobody —</option>
+              </select>
+            </label>
+            <label class="toggle cmp-only" title="Show only items that beat what the compared toon currently wears">
+              <input type="checkbox" id="invUpgradesOnly"> upgrades only
+            </label>
+            <button id="invClearFiltersBtn" class="btn btn-ghost btn-sm" type="button" hidden
+              title="Clear every per-column min / contains filter in the table header">✕ clear column filters</button>
+          </div>
+
+          <div class="table-wrap">
+            <table id="invTable" class="grid">
+              <thead><tr id="invHead">
+                <th data-col="name">Item</th>
+                <th data-col="qty" class="qty">Qty</th>
+                <th data-col="location" class="loc">Where</th>
+              </tr></thead>
+              <tbody id="invBody">
+                <tr><td colspan="3" class="empty">Load inventory dumps above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pane-foot">
+            <button id="selAllBtn" class="btn btn-ghost btn-sm" type="button" disabled>Select All</button>
+            <button id="addSelBtn" class="btn btn-primary btn-sm" type="button" disabled
+              title="Add highlighted rows to the auction (sell) list. Tip: double-click a row to add just that one.">Add Selected →</button>
+            <button id="invVendorBtn" class="btn btn-ghost btn-sm" type="button" title="Send highlighted rows straight to the Vendor list">→ Vendor</button>
+            <button id="invGearBtn" class="btn btn-ghost btn-sm" type="button" hidden title="Retired — gear sets now live in My Characters → Gear Sets (snapshot a toon's worn gear there)">→ Gear set</button>
+            <button id="upgradeBtn" class="btn btn-ghost btn-sm" type="button" title="Find gear upgrades for a toon — from your bags or the TLP market within a price cap">🔍 Upgrades</button>
+            <span class="grow"></span>
+            <span class="lookup">
+              <input type="text" id="lookupInput" class="input input-sm" placeholder="look up any item…">
+              <button id="lookupBtn" class="btn btn-ghost btn-sm" type="button" title="Check any item's market — even ones you don't have">Recent Postings</button>
+            </span>
+          </div>
+        </section>
+
+        <!-- RIGHT: sell / vendor -->
+        <section class="card pane">
+          <div class="pane-head">
+            <span class="step-num">3</span>
+            <div class="subtabs">
+              <button id="sellTab" class="subtab active" type="button">Sell list <span class="pill" id="aucCount">0</span></button>
+              <button id="vendorTab" class="subtab" type="button">Vendor list <span class="pill" id="vendorCount">0</span></button>
+              <button id="soldTab" class="subtab" type="button">Sold <span class="pill" id="soldCount">0</span></button>
+              <button id="upgradeTab" class="subtab" type="button" title="Compare a toon's equipped gear against BIS and quest-armor data, slot by slot. Click a slot to see alternatives.">🔍 Upgrades</button>
+              <button id="distTab" class="subtab" type="button" title="The Gear Planner moved to My Characters → Gear Sets (snapshot worn loadouts, account-aware transfer routing). Click to go there.">🎁 Gear Planner ↗</button>
+            </div>
+            <button id="excludedLink" class="btn btn-ghost btn-sm" type="button" title="View / manage items you've excluded forever">Excluded</button>
+          </div>
+
+          <!-- SELL panel -->
+          <div id="sellPanel">
+            <div class="auc-controls">
+              <div class="ctl adjust-field" title="Shift every price-checked median by this %. Left = undercut, right = markup. Moves prices live after a check. 0 = median as-is.">
+                <label for="adjust">Price adjust</label>
+                <input type="range" id="adjustRange" min="-50" max="100" step="5" value="0">
+                <input type="number" id="adjust" class="input input-num" value="0" min="-90" max="500" step="5">
+                <span class="suffix">%</span>
+              </div>
+              <div class="ctl">
+                <label for="cha" title="Your Charisma — sets the NPC vendor buyback estimate.">CHA</label>
+                <input type="number" id="cha" class="input input-num" value="75" min="0" max="255">
+              </div>
+              <div class="ctl">
+                <label for="minProfit" title="Min profit over NPC vendor value to bother listing. Below this → 'vendor it', cut from the macro. 0 = off.">Min profit</label>
+                <input type="number" id="minProfit" class="input input-num" value="50" min="0">
+              </div>
+              <div class="ctl" title="The API median is a full-history median — it lags on volatile items (spells especially). When ≥3 recent asks diverge ≥15% from it, price from the recent market instead. Applies on the next price check; adopted items are listed in the log.">
+                <label for="useRecent">Recent pricing</label>
+                <input type="checkbox" id="useRecent" checked>
+              </div>
+              <div class="ctl lists-ctl">
+                <label for="listSelect">Saved lists</label>
+                <select id="listSelect" class="input input-sm"><option value="">— no saved lists —</option></select>
+                <button id="listLoadBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Load the selected saved list into the sell list (replaces the current one)">Load</button>
+                <button id="listSaveBtn" class="btn btn-ghost btn-sm" type="button" title="Save the current sell list (or just the selected rows) as a named list you can reload later — prices included">Save…</button>
+                <button id="listDelBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Delete the selected saved list">✕</button>
+              </div>
+            </div>
+
+            <div class="auc-actions">
+              <button id="aucSelAllBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Select every row currently shown (respects the search box) — for macroing or totaling a group in one click">Select shown</button>
+              <button id="pcBtn" class="btn btn-accent btn-sm" type="button" disabled>PC All</button>
+              <button id="pcSelBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Price-check the selected rows">Price Check</button>
+              <button id="applySelBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Apply the Price adjust % above to ONLY the selected rows (off each item's median), then hold them so the global slider won't move them. e.g. leave the slider at 0%, select spells, bump them to +100%.">Apply % → Sel</button>
+              <button id="reviewBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Show only items likely underpriced (recent asks/bids above your price) — then reprice up">⚠ Review</button>
+              <button id="rpBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Recent postings for the selected item">Recent Postings</button>
+              <button id="toKronoBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Convert selected rows to their krono equivalent (nearest ½ krono)">→ Krono</button>
+              <span class="grow"></span>
+              <span id="selAdjustWrap" class="sel-adjust" hidden title="Drag to adjust ONLY the selected rows, live, off each item's median — the global slider keeps driving everything else. Selected rows are held so the global slider won't move them. Press Esc to deselect.">
+                <label for="selAdjustRange">Selected</label>
+                <input type="range" id="selAdjustRange" min="-50" max="200" step="5" value="0">
+                <output id="selAdjustVal" class="sel-adjust-val">0%</output>
+              </span>
+              <span id="sellTally" class="sell-tally"></span>
+              <button id="copyTallyBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Copy an itemized total of the selected rows to quote a buyer buying several items">Copy total</button>
+              <button id="soldBtn" class="btn btn-primary btn-sm" type="button" disabled title="Log selected rows as SOLD (records the price) and remove them from the sell list">Sold ✓</button>
+              <button id="toVendorBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Move selected rows to the Vendor list">→ Vendor</button>
+              <button id="removeBtn" class="btn btn-ghost btn-sm" type="button" disabled>Remove</button>
+              <button id="excludeBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Remove AND never show/add these again (bags, junk)">Exclude</button>
+              <button id="clearBtn" class="btn btn-ghost btn-sm" type="button" disabled>Clear</button>
+            </div>
+
+            <div class="auc-search">
+              <input type="search" id="aucSearch" class="input input-sm" placeholder="Search your sell list (find an item live)…">
+            </div>
+            <div class="table-wrap">
+              <table id="aucTable" class="grid">
+                <thead><tr>
+                  <th class="pick" title="Tick items a buyer wants — the total below sums the ticked rows"><input type="checkbox" id="aucPickAll" title="Select/clear all shown"></th>
+                  <th data-col="name">Item</th>
+                  <th data-col="qty" class="qty">Qty</th>
+                  <th data-col="price" class="price">Price</th>
+                  <th data-col="vendor" class="qty">Vendor</th>
+                  <th data-col="where" class="loc">Where</th>
+                </tr></thead>
+                <tbody id="aucBody">
+                  <tr><td colspan="5" class="empty">Add items from the left.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="legend">
+              <span class="lg lg-under">sells higher → reprice up</span>
+              <span class="lg lg-demand" title="Buyers are actively WTB-ing this (frequent buy bids vs asks — krono, gems, WTB-spammed rares). A seller's market: hold your price or nudge it up, buyers will PM you. Don't undercut.">📈 in demand → hold / price up</span>
+              <span class="lg lg-saturated" title="Flooded market AND you're priced above the recent ask median. Drop to/under the median (slider or type) and it clears — you're competitive. EQ buyers PM the cheapest/most-recent seller, so re-post to stay recent too. Hover a price for the market read.">🔥 flooded & you're high → undercut</span>
+              <span class="lg lg-thin" title="Few asks spread over many days — scarce. Hold your price; don't let the global discount slider drag it down.">🟢 thin → hold price</span>
+              <span class="lg lg-krono">krono</span>
+              <span class="lg lg-vendor">vendor it</span>
+              <span class="lg lg-diverge">recent asks lower → maybe overpriced</span>
+              <span class="lg lg-freeze" title="Price frozen (you pinned it) — the global slider skips this row. Click the ❄ on the row to unfreeze.">❄ frozen → click to reset</span>
+              <button id="tipsBtn" class="lg-tips" type="button" title="How pricing works, reading the flags, selling strategy, and finding/parceling items across your toons">❔ Selling tips</button>
+            </div>
+          </div>
+
+          <!-- VENDOR panel -->
+          <div id="vendorPanel" hidden>
+            <div class="vendor-total">
+              Vendor these to an NPC for about <strong id="vendorTotal">0p</strong>
+              <span class="hint">(at CHA <span id="vendorChaEcho"></span> — buyback estimate)</span>
+            </div>
+            <div class="auc-actions">
+              <span class="grow"></span>
+              <button id="vendorRemoveBtn" class="btn btn-ghost btn-sm" type="button" disabled>Remove</button>
+              <button id="vendorClearBtn" class="btn btn-ghost btn-sm" type="button" disabled>Clear</button>
+            </div>
+            <div class="table-wrap">
+              <table id="vendorTable" class="grid">
+                <thead><tr>
+                  <th class="">Item</th>
+                  <th class="loc">Who</th>
+                  <th class="qty">Qty</th>
+                  <th class="qty">Each</th>
+                  <th class="qty">Total</th>
+                </tr></thead>
+                <tbody id="vendorBody">
+                  <tr><td colspan="5" class="empty">Add items here to tally NPC value.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- SOLD panel -->
+          <div id="soldPanel" hidden>
+            <div class="sold-total">
+              Earned today <strong id="soldToday">0p</strong>
+              <span class="hint">· all-time <strong id="soldTotal">0p</strong></span>
+              <span class="grow"></span>
+              <button id="soldClearBtn" class="btn btn-ghost btn-sm" type="button" disabled title="Clear your whole sales history">Clear history</button>
+            </div>
+            <div class="table-wrap">
+              <table id="soldTable" class="grid">
+                <thead><tr>
+                  <th>Item</th>
+                  <th class="qty">Qty</th>
+                  <th class="price">Sold for</th>
+                  <th class="qty">When</th>
+                  <th class="qty"></th>
+                </tr></thead>
+                <tbody id="soldBody">
+                  <tr><td colspan="5" class="empty">Nothing sold yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- UPGRADES panel (built by renderUpgradePanel) -->
+          <div id="upgradePanel" class="upg" hidden></div>
+
+          <!-- WHO-HAS-IT / gear distributor panel (built by renderDistPanel) -->
+          <div id="distPanel" class="dist" hidden></div>
+        </section>
+      </div>
+
+      <!-- Generate + write -->
+      <section class="card gen-card">
+        <div class="pane-head">
+          <span class="step-num">4</span>
+          <strong>Generate &amp; write macros</strong>
+        </div>
+        <div class="gen-controls">
+          <div class="ctl" title="Text that starts every generated macro line — the channel and your pitch. Default /auc WTS auctions to the zone."><label for="prefix">Prefix</label><input type="text" id="prefix" class="input" value="/auc WTS"></div>
+          <div class="ctl" title="Which social page the generated buttons start on. Pages 1–2 are left alone for your own socials; sell macros flow from here onward."><label for="page">Start page</label><input type="number" id="page" class="input input-num" value="2" min="2" max="10"></div>
+          <div class="ctl" title="Optional text appended to every macro line, e.g. “pst” or “/tell me”. Counts against the 255-char limit."><label for="suffix">Suffix</label><input type="text" id="suffix" class="input" value=""></div>
+          <button id="genBtn" class="btn btn-primary" type="button" title="Pack the sell list into Spell / Gear / Misc social buttons of clickable item links, and move vendor-trash to the Vendor list." disabled>Generate</button>
+        </div>
+        <label for="output" class="hint">INI output (the <code>[Socials]</code> entries this writes):</label>
+        <textarea id="output" rows="8" spellcheck="false" placeholder="Generated INI entries appear here…"></textarea>
+        <div class="gen-write">
+          <button id="writeBtn" class="btn btn-accent" type="button" disabled title="Chrome/Edge: pick the ONE character's INI to post from — every macro goes onto that toon">Write to INI file (Chrome/Edge)</button>
+          <button id="copyBtn" class="btn btn-ghost" type="button" disabled title="Copy the [Socials] entries and paste them into your character INI">Copy macros</button>
+          <label class="toggle" title="Before writing, wipe ALL old macro buttons on social pages 3 and up (your personal pages 1–2 are kept), for a clean slate. Off = just add/update this batch's pages."><input type="checkbox" id="wipeSell"> Overwrite sell pages (3+)</label>
+          <span class="hint">Pick the INI of the one toon you want to post from. Close EQ first.</span>
+        </div>
+      </section>
+
+    </div><!-- /builderView -->
+
+    <!-- Live Monitor -->
+    <div id="monitorView" hidden>
+      <section class="card">
+        <div class="pane-head"><strong>Live EC Tunnel Monitor</strong><span class="pill beta">beta</span></div>
+        <p class="hint">
+          Alerts when someone <strong class="ok">wants to buy</strong> an item you have (needs inventory loaded),
+          or <strong class="krono-txt">sells</strong> an item on your watchlist. Reads <em>your own</em> EQ log
+          in the browser — nothing is uploaded. <strong>Keep this tab visible</strong> for alerts to fire.
+        </p>
+        <div class="row">
+          <span class="hint" id="wlInvNote">SELL alerts (a buyer for your gear) need your inventory loaded.</span>
+          <button id="wlLoadInv" class="btn btn-ghost btn-sm" type="button">Load inventory…</button>
+        </div>
+        <div class="row">
+          <input type="text" id="wlInput" class="input" list="wlNames" placeholder="add an item to watch…" autocomplete="off">
+          <datalist id="wlNames"></datalist>
+          <button id="wlAddBtn" class="btn btn-ghost btn-sm" type="button">Add</button>
+        </div>
+        <div id="wlList" class="wl-list"></div>
+        <div class="row wl-monitor-row" id="wlMonitorRow">
+          <button id="wlPickLog" class="btn btn-ghost btn-sm" type="button" title="Pick your EQ log file (eqlog_&lt;char&gt;_&lt;server&gt;.txt). Stays on your machine.">Pick EQ log file…</button>
+          <span class="hint" id="wlLogName">no log file picked</span>
+          <button id="wlToggle" class="btn btn-accent btn-sm" type="button" disabled>Start monitoring</button>
+          <button id="wlTestAlert" class="btn btn-ghost btn-sm" type="button" title="Fire a sample notification">Test alert</button>
+          <label class="toggle" title="Ping (browser notification) when you get a direct /tell. Tells still appear in the feed either way."><input type="checkbox" id="tellPing" checked> Tell pings</label>
+        </div>
+        <div id="wlStatus" class="wl-status">Not monitoring</div>
+        <div id="wlFeed" class="wl-feed" hidden></div>
+      </section>
+    </div><!-- /monitorView -->
+
+    <pre id="log" hidden></pre>
+  </main>
+
+  <div id="statusbar">
+    <span id="statusMsg">Ready.</span>
+    <button id="logBtn" class="btn btn-ghost btn-sm" type="button" title="Show the full activity log">Log</button>
+  </div>
+
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head"><strong id="modalTitle"></strong><button id="modalClose" type="button" title="Close">&times;</button></div>
+      <div id="modalBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="coltable.js"></script>
+  <script src="watchlist.js"></script>
+  <script src="forge.js"></script>
+</body>
+</html>

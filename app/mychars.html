@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Characters — EQ Forge 2.0</title>
+  <meta name="description" content="EverQuest multibox roster manager: accounts, characters, six-box composition builder with account-conflict detection, keys and access tracking, roster optimizer.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="mychars.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="logo">My&nbsp;Characters <span class="ver-badge">EQ&nbsp;Forge</span></span>
+      <span class="tagline">multibox roster · one toon per account goes live</span>
+    </div>
+    <div class="header-stats">
+      <span class="stat" id="mcCounts">loading…</span>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn-ghost btn-sm" href="index.html">← Macro Builder</a>
+    </div>
+  </header>
+
+  <nav class="viewtabs">
+    <button class="viewtab mtab active" data-mtab="roster" type="button">Roster</button>
+    <button class="viewtab mtab" data-mtab="builder" type="button">Comp Builder</button>
+    <button class="viewtab mtab" data-mtab="gear" type="button">Gear</button>
+    <button class="viewtab mtab" data-mtab="harvest" type="button">Harvest</button>
+    <button class="viewtab mtab" data-mtab="sets" type="button">Gear Sets</button>
+    <button class="viewtab mtab" data-mtab="keys" type="button">Keys &amp; Access</button>
+    <button class="viewtab mtab" data-mtab="import" type="button">Import</button>
+    <button class="viewtab mtab" data-mtab="optimizer" type="button">Optimizer</button>
+    <a class="viewtab" href="setup.html" title="Find your EverQuest and MacroQuest folders, install the in-game addon">⚙ Setup</a>
+  </nav>
+
+  <main class="mc-main">
+
+    <!-- ============ ROSTER ============ -->
+    <div id="mtab-roster">
+      <div id="summaryRow" class="summary-row"></div>
+
+      <section class="card mc-card loginset-card">
+        <div class="mc-cardhead">
+          <h2>Current Login Set</h2>
+          <span class="hint">one toon per account — what you're actually going to log in</span>
+          <span class="grow"></span>
+          <button id="lsValidateBtn" class="btn btn-ghost btn-sm" type="button">Validate Group</button>
+          <button id="lsBuilderBtn" class="btn btn-ghost btn-sm" type="button">Open in Comp Builder</button>
+          <button id="lsPushBtn" class="btn btn-ghost btn-sm" type="button"
+            title="OPTIONAL — requires MacroQuest. Writes this login set to mychars_loginset.lua in MQ's config folder so an in-game script can read it. Harmless if nothing reads it.">📤 Push login set</button>
+          <button id="lsLaunchBtn" class="btn btn-sm" type="button">Launch Group</button>
+        </div>
+        <div id="loginSetRow" class="loginset-row"></div>
+        <div id="lsWarnings" class="warn-panel"></div>
+      </section>
+
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Accounts</h2>
+          <span class="hint">click a toon to make it the login pick · claims are verified from inventory dumps</span>
+          <span class="grow"></span>
+          <button id="acctModeBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Flip every account label between login names and nicknames (nickname falls back to 'Account N' if not set)"></button>
+          <button id="loginNamesBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Rename account aliases to your real AutoLogin usernames (reads ONLY the username column from login.db — passwords are never touched). You can still hand-edit any alias afterwards.">🏷 Use login names</button>
+          <button id="scanClaimsBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Scan inventory dumps for account-bound claim items AND load membership/sub-expiry from the in-game export (mychars_export.csv)">🔎 Scan game data</button>
+          <button id="addAcctBtn" class="btn btn-sm" type="button">+ Account</button>
+        </div>
+        <div id="acctGrid" class="acct-grid"></div>
+      </section>
+
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Characters</h2>
+          <span id="quickFilterTag" class="chip" hidden></span>
+          <select id="fAcct"><option value="">All accounts</option></select>
+          <select id="fClass"><option value="">All classes</option></select>
+          <select id="fStatus"><option value="">All statuses</option></select>
+          <input id="fSearch" type="search" placeholder="Search name / tags…">
+          <span class="grow"></span>
+          <button id="addCharBtn" class="btn btn-sm" type="button">+ Character</button>
+        </div>
+        <div class="tablewrap sticky">
+          <table class="mc-table" id="charTable">
+            <thead><tr>
+              <th>Character</th><th>Account</th><th>Class / Level</th><th>Role</th>
+              <th>Automation</th><th>Readiness</th><th>Team</th><th>Issues</th><th></th>
+            </tr></thead>
+            <tbody id="charRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ COMP BUILDER ============ -->
+    <div id="mtab-builder" hidden>
+      <div class="builder-grid">
+        <section class="card mc-card">
+          <div class="mc-cardhead">
+            <h2>Composition</h2>
+            <select id="compSelect"><option value="">— new composition —</option></select>
+            <button id="compNewBtn" class="btn btn-ghost btn-sm" type="button">New</button>
+            <span class="grow"></span>
+            <button id="compSaveBtn" class="btn btn-sm" type="button">Save</button>
+            <button id="compDeleteBtn" class="btn btn-ghost btn-sm danger" type="button">Delete</button>
+          </div>
+          <div class="comp-meta">
+            <input id="compName" placeholder="Name (Core Six, Raid Six, PL Group…)">
+            <input id="compNotes" placeholder="Notes">
+            <input id="compReq" list="reqDatalist" placeholder="Required access (comma list, e.g. Sebilis Key)">
+            <datalist id="reqDatalist"></datalist>
+          </div>
+          <div class="autofill">
+            <span class="hint">Must have:</span>
+            <div id="reqChips" class="req-chips"></div>
+            <select id="reqClassSel"><option value="">+ class…</option></select>
+            <button id="autoFillBtn" class="btn btn-sm" type="button"
+              title="Brute-force the best one-per-account six for these requirements. Primary providers preferred — fallbacks (like bard-weave slow) only used as a last resort, with a warning.">⚙ Auto-Fill</button>
+          </div>
+          <div id="autoResult"></div>
+          <div id="slotGrid" class="slot-grid"></div>
+          <div id="powerPanel" class="power-panel"></div>
+          <div class="mc-cardhead" style="margin-top:10px">
+            <h2 style="font-size:13px">Bench / swaps</h2>
+            <span class="hint">rotation + fight subs · exempt from the one-per-account rule (they log in when a live toon logs out)</span>
+            <span class="grow"></span>
+            <button id="benchAddBtn" class="btn btn-ghost btn-sm" type="button">+ Bench slot</button>
+          </div>
+          <div id="benchGrid" class="slot-grid"></div>
+          <div id="warnPanel" class="warn-panel"></div>
+          <div id="gearCheckPanel" class="warn-panel"></div>
+        </section>
+        <section class="card mc-card">
+          <div class="mc-cardhead">
+            <h2>Pick characters</h2>
+            <span class="hint">grayed = its account is already used in this comp</span>
+          </div>
+          <div id="pickerList" class="picker-list"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ============ GEAR ============ -->
+    <div id="mtab-harvest" hidden>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Dump Coverage</h2>
+          <span class="hint">every roster toon vs its inventory dump on disk — who got missed, and what the dump actually caught</span>
+          <span class="grow"></span>
+          <label class="hint">stale after
+            <select id="hvStale">
+              <option value="24">1 day</option>
+              <option value="72">3 days</option>
+              <option value="168" selected>1 week</option>
+              <option value="720">1 month</option>
+            </select>
+          </label>
+          <button id="hvRefreshBtn" class="btn btn-ghost btn-sm" type="button">Refresh</button>
+        </div>
+        <div id="hvRun" class="hint"></div>
+        <div id="hvSummary" class="hv-summary"></div>
+        <div class="mc-cardhead hv-armbar">
+          <span class="hint">Tick toons → arm an unattended run. Each account's client walks its own list: log in → dump → camp → next.</span>
+          <span class="grow"></span>
+          <button id="hvHidePicked" class="btn btn-ghost btn-sm" type="button" title="Hide the ticked toons from this report — they stay on the roster, they just stop being counted or armed here">🚫 Hide picked</button>
+          <button id="hvShowHidden" class="btn btn-ghost btn-sm" type="button" title="Show the hidden toons so you can bring one back">👁 Hidden (<span id="hvHiddenCount">0</span>)</button>
+          <button id="hvPickProblems" class="btn btn-ghost btn-sm" type="button" title="Select everything that isn't ok">Select problems</button>
+          <button id="hvPickHoard" class="btn btn-ghost btn-sm" type="button" title="Select toons that own a Dragon's Hoard">Select hoard toons</button>
+          <button id="hvPickNone" class="btn btn-ghost btn-sm" type="button">Clear</button>
+          <button id="hvArmBtn" class="btn btn-sm" type="button">⚡ Arm harvest (<span id="hvPickCount">0</span>)</button>
+          <button id="hvDisarmBtn" class="btn btn-ghost btn-sm" type="button" title="Delete every queue file — the hard stop">⛔ Disarm</button>
+        </div>
+        <div id="hvStatus" class="hint"></div>
+        <div class="tablewrap sticky">
+          <table class="mc-table" id="hvTable">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="hvPickAll" title="Select all shown"></th>
+                <th>Toon</th><th>Account</th><th>Status</th>
+                <th title="Worn items">Worn</th>
+                <th title="Items in bags">Bags</th>
+                <th title="Personal bank — arrives at login, no banker needed">Bank</th>
+                <th title="Shared bank — arrives at login, no banker needed">Shared</th>
+                <th title="Dragon's Hoard — only captured with a banker window open">Hoard</th>
+                <th title="Age of the dump file">Age</th>
+                <th>What to do</th>
+                <th title="Hide this toon from the report"></th>
+              </tr>
+            </thead>
+            <tbody id="hvRows"></tbody>
+          </table>
+        </div>
+        <div id="hvOrphans" class="hint" style="margin-top:6px"></div>
+      </section>
+    </div>
+
+    <div id="mtab-gear" hidden>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Worn Stat Sheet</h2>
+          <span class="hint">summed from each toon's last inventory dump · haste = best single worn item</span>
+          <span class="grow"></span>
+          <button id="gearRefreshBtn" class="btn btn-ghost btn-sm" type="button">Refresh</button>
+        </div>
+        <div id="gearStatus" class="hint"></div>
+        <div class="tablewrap sticky">
+          <table class="mc-table" id="gearTable">
+            <thead id="gearHead"></thead>
+            <tbody id="gearRows"></tbody>
+          </table>
+        </div>
+        <div id="gearMissing" class="hint" style="margin-top:6px"></div>
+      </section>
+
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Best in Inventory</h2>
+          <span class="hint">every worn/bag/bank item across all dumped toons, ranked</span>
+          <select id="bestStat"></select>
+          <select id="bestClass"><option value="">Any class</option></select>
+          <button id="bestGoBtn" class="btn btn-sm" type="button">Find</button>
+        </div>
+        <div class="tablewrap">
+          <table class="mc-table">
+            <thead><tr><th>#</th><th>Item</th><th>Value</th><th>Holder</th><th>Where</th><th>Usable by</th></tr></thead>
+            <tbody id="bestRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ GEAR SETS (planner moved here from the Macro Builder) ============ -->
+    <div id="mtab-sets" hidden>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Gear Sets</h2>
+          <span class="hint">snapshot what a toon is wearing · assign the set to whoever you'll play next</span>
+          <span class="grow"></span>
+          <select id="gsSnapChar"></select>
+          <input id="gsSnapName" placeholder="Set name (blank = auto)">
+          <button id="gsSnapBtn" class="btn btn-sm" type="button"
+            title="Save the selected toon's currently WORN gear (from its newest inventory dump) as a named, reusable set. Re-snapshotting the same name updates it.">📸 Snapshot worn gear</button>
+          <button id="gsNewBtn" class="btn btn-sm" type="button"
+            title="Build a custom set by hand — every slot is a dropdown over everything you own, across every toon">🛠 New custom set</button>
+          <button id="gsImportBtn" class="btn btn-ghost btn-sm" type="button"
+            title="One-time copy of the gear sets you built in the Macro Builder's old Gear Planner (browser storage) into the roster database — targets and Active flags come along.">⇪ Import old sets</button>
+        </div>
+        <div class="tablewrap">
+          <table class="mc-table" id="gsTable">
+            <thead><tr>
+              <th>Set</th><th>Class</th><th>Snapshot of</th><th>Assigned to</th>
+              <th>Pieces</th><th>On target</th><th>Active</th><th></th>
+            </tr></thead>
+            <tbody id="gsRows"></tbody>
+          </table>
+        </div>
+        <div id="gsStatus" class="hint" style="margin-top:6px"></div>
+      </section>
+
+      <section class="card mc-card" id="gsEditorCard" hidden>
+        <div class="mc-cardhead">
+          <h2 id="gsEdTitle">Set editor</h2>
+          <input id="gsEdName" placeholder="Set name">
+          <select id="gsEdClass" title="Class filter — dropdowns only offer gear this class can wear"></select>
+          <select id="gsEdAssign" title="Who this set is for"></select>
+          <span class="grow"></span>
+          <span id="gsEdCount" class="hint"></span>
+          <button id="gsEdBestBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Fill every EMPTY armor/jewelry slot with your best available piece (class-weighted score, same brain as the Upgrade Finder). Skips weapons/range/ammo — pick those yourself. Never picks No-Trade gear another toon holds, never over-picks LORE or short copies.">⭐ Best available</button>
+          <button id="gsEdClearBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Empty every slot — save afterwards to free all this set's item claims while keeping the set for rebuilding">🧹 Clear all</button>
+          <button id="gsEdSaveBtn" class="btn btn-sm" type="button">💾 Save set</button>
+          <button id="gsEdCancelBtn" class="btn btn-ghost btn-sm" type="button">Close</button>
+        </div>
+        <div id="gsEdTotals" class="gs-totals"></div>
+        <div class="hint" style="margin-bottom:6px">
+          Click a slot on the left to see <b>everything you own across all toons</b> (worn, bags,
+          bank, shared, hoard, persona) that the class can wear. Grayed = every copy is already
+          claimed by another active set. ⛔ = No Trade, LORE noted.
+        </div>
+        <div class="gs-ed2">
+          <div class="gs-ed-slots">
+            <table class="mc-table" id="gsEdTable">
+              <thead><tr><th>Slot</th>
+                <th title="What this SET says they should wear — not what they have on. Each row shows where that piece actually is right now.">Set pick <span class="hint">— target loadout</span></th>
+              </tr></thead>
+              <tbody id="gsEdRows"></tbody>
+            </table>
+          </div>
+          <div class="gs-ed-cands">
+            <div class="gs-cand-head">
+              <span id="gsCandTitle" class="gs-cand-title">Pick a slot</span>
+              <span class="grow"></span>
+              <label class="hint">sort
+                <select id="gsCandSort" class="gs-cand-sort">
+                  <option value="score">best overall</option>
+                  <option value="ac">AC</option>
+                  <option value="hp">HP</option>
+                  <option value="mana">Mana</option>
+                  <option value="name">name</option>
+                </select>
+              </label>
+              <label class="hint" title="Hide pieces where every copy is already claimed by another active set">
+                <input type="checkbox" id="gsCandFree"> free only
+              </label>
+            </div>
+            <div id="gsCandList" class="gs-cand-list">
+              <p class="hint gs-cand-empty">Select a slot to browse what you own for it.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Move Plan</h2>
+          <span class="hint">every ACTIVE set, routed by real cost — your shared bank beats a swap beats a parcel · uses the Current Login Set for trade-now routing</span>
+          <span class="grow"></span>
+          <label class="hint" title="Moves routed from a dump older than this are flagged — the holder may not still have the item">don't trust dumps over
+            <select id="gsStale">
+              <option value="24">1 day</option>
+              <option value="48">2 days</option>
+              <option value="72">3 days</option>
+              <option value="168" selected>1 week</option>
+            </select>
+          </label>
+          <button id="gsPlanBtn" class="btn btn-sm" type="button">🧭 Plan transfers</button>
+          <button id="gsExportBtn" class="btn btn-ghost btn-sm" type="button"
+            title="OPTIONAL — requires MacroQuest. Writes the plan into MQ's config folder for the in-game tools: mailgearplan.lua for MailGear (included, /mailgear — dequip, bank-pull, equip), parcel_gearplan.lua so the set shows up as a source in DerpleDude's parcel script, and trixbox_gearplan.lua for TrixBox if you have it. See MQ-SETUP.md.">⇩ Send plans to MQ</button>
+        </div>
+        <div id="gsPlan"><div class="hint">Snapshot a set, assign it, then hit Plan transfers. Refresh your dumps in game first (/outputfile inventory, or /eqf dump) so the plan isn't built on stale files.</div></div>
+      </section>
+    </div>
+
+    <!-- ============ KEYS & ACCESS ============ -->
+    <div id="mtab-keys" hidden>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Lockout Board</h2>
+          <span class="hint">per-toon lockouts from exports in the last 3 days · dot + tag = the toon's account</span>
+        </div>
+        <div id="lockBoard" class="lockboard"></div>
+      </section>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Split Availability</h2>
+          <span class="hint" id="sbHint">per active target: FREE toons by class (not locked) · hover a chip for names · the scarcest class you need caps your splits</span>
+          <span class="grow"></span>
+          <button id="sbGroupBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Toggle whether free toons are grouped by class or by account">👥 by account</button>
+          <label class="hint" style="display:flex;align-items:center;gap:5px">min level
+            <input id="sbMinLvl" type="number" min="1" max="60" value="59" style="width:52px"></label>
+        </div>
+        <div id="splitBoard" class="lockboard"></div>
+      </section>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Keys, Access &amp; Readiness</h2>
+          <span class="hint">flexible unlock table — keys, flags, clickies, automation checks</span>
+        </div>
+        <div class="unlock-add">
+          <select id="ulChar"></select>
+          <input id="ulName" list="ulExamples" placeholder="Unlock name…">
+          <datalist id="ulExamples"></datalist>
+          <input id="ulExpansion" placeholder="Expansion">
+          <select id="ulCategory">
+            <option>key</option><option>access</option><option>clicky</option>
+            <option>flag</option><option>automation</option>
+          </select>
+          <select id="ulScope"><option>character</option><option>account</option></select>
+          <select id="ulPriority">
+            <option>critical</option><option>high</option><option selected>normal</option><option>low</option>
+          </select>
+          <select id="ulStatus"></select>
+          <button id="ulAddBtn" class="btn btn-sm" type="button">Add</button>
+        </div>
+        <div class="tablewrap">
+          <table class="mc-table">
+            <thead><tr>
+              <th>Character</th><th>Unlock</th><th>Expansion</th><th>Cat</th><th>Scope</th>
+              <th>Priority</th><th>Status</th><th>Verified</th><th>Notes</th><th></th>
+            </tr></thead>
+            <tbody id="unlockRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Raid Lockouts</h2>
+          <span class="hint">check = saved · times come from the MQ export and auto-expire</span>
+          <span class="grow"></span>
+          <button id="lockLoadBtn" class="btn btn-sm" type="button"
+            title="Read config/mychars_lockouts.txt (written by /lua run mychars_lockouts on each toon) and apply real DZ lockouts with expiry times.">
+            ⚡ Load lockouts from MQ</button>
+          <input id="raidName" placeholder="Add raid (e.g. Vindi)">
+          <button id="raidAddBtn" class="btn btn-sm" type="button">+ Raid</button>
+        </div>
+        <div class="tablewrap"><table class="mc-table" id="lockGridTable">
+          <thead id="lockHead"></thead><tbody id="lockGrid"></tbody>
+        </table></div>
+      </section>
+    </div>
+
+    <!-- ============ IMPORT ============ -->
+    <div id="mtab-import" hidden>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Import characters</h2>
+          <span class="hint">CSV or JSON · merges by Server + Name · password-looking fields are ALWAYS stripped</span>
+        </div>
+        <p class="hint">Headers understood: <code>name, server, account, class, level, race, role, status,
+          tags, gear, epic, portbot, automation, notes</code>. Blank cells never overwrite existing data.
+          In-game: run the <code>mychars_export.lua</code> MQ script on each toon (safe to
+          broadcast — each toon writes its own <code>mychars_export_&lt;Name&gt;.csv</code>), then
+          <b>Load in-game exports</b> below reads them ALL server-side — the freshest source for
+          <b>levels</b> (AutoLogin's login.db only refreshes at the character-select screen).
+          "Scan game data" on the Roster tab reads the same files for membership/claims only. Future
+          feeds (character INIs, RGMercs INIs, /outputfile) plug into the same preview.</p>
+        <div class="import-row">
+          <button id="impExportsBtn" class="btn btn-sm" type="button"
+            title="Read every mychars_export_<Name>.csv in the MQ config dir server-side — LIVE levels from the in-game export (freshest source). Run Export All in game first, then this, then Preview → Import.">
+            📄 Load in-game exports</button>
+          <button id="impAutoBtn" class="btn btn-sm" type="button"
+            title="Read config/login.db server-side — characters, classes, levels and account grouping. Levels here lag (harvested at character select). Account names and passwords are never read.">
+            ⚡ Load from MQ AutoLogin</button>
+          <input type="file" id="impFile" accept=".csv,.json,.txt">
+          <button id="impSeedBtn" class="btn btn-ghost btn-sm" type="button"
+            title="Load a small made-up roster (6 accounts, 9 placeholder characters) so you can see what the tabs do before importing your own. Only works while the roster is still empty.">
+            Load sample roster</button>
+          <span class="grow"></span>
+          <button id="impPreviewBtn" class="btn btn-sm" type="button">Preview</button>
+          <button id="impCommitBtn" class="btn btn-sm" type="button" disabled>Import</button>
+        </div>
+        <div id="alMapPanel" class="almap" hidden></div>
+        <textarea id="impText" rows="8" spellcheck="false"
+          placeholder="Paste CSV or JSON here, or choose a file above…&#10;name,server,account,class,level&#10;Rakthor,Frostreaver,Acct1,Monk,60"></textarea>
+        <div id="impResult"></div>
+      </section>
+    </div>
+
+    <!-- ============ OPTIMIZER ============ -->
+    <div id="mtab-optimizer" hidden>
+      <section class="card mc-card">
+        <div class="mc-cardhead">
+          <h2>Roster Optimizer</h2>
+          <span class="hint">missing roles · dangerous account pairings · next-character advice · unlock gaps</span>
+          <span class="grow"></span>
+          <button id="recRefreshBtn" class="btn btn-ghost btn-sm" type="button">Refresh</button>
+        </div>
+        <div id="recList" class="rec-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ DIALOGS ============ -->
+  <dialog id="acctDlg" class="mc-dialog">
+    <h3 id="acctDlgTitle">Account</h3>
+    <div class="dlg-grid">
+      <label>Alias (login name) <input id="aAlias" placeholder="login username or Acct1"></label>
+      <label>Nickname <input id="aNickname" placeholder="Cleric Account, Bard Box…"></label>
+      <label>Account # <input id="aNumber" placeholder="ordinal only — never a login"></label>
+      <label>Status <select id="aStatus">
+        <option>active</option><option>inactive</option><option>banned</option><option>unknown</option>
+      </select></label>
+      <label>AutoLogin group <input id="aGroup"></label>
+      <label>Launch order <input id="aOrder" type="number" min="0"></label>
+      <label class="wide">Perks (comma list) <input id="aPerks" placeholder="Mount, WW Clicky, Food Clicky, Water Clicky"></label>
+      <label class="wide">Notes <textarea id="aNotes" rows="2"></textarea></label>
+    </div>
+    <div class="dlg-actions">
+      <button id="aDeleteBtn" class="btn btn-ghost btn-sm danger" type="button">Delete</button>
+      <span class="grow"></span>
+      <button class="btn btn-ghost btn-sm dlg-cancel" type="button">Cancel</button>
+      <button id="aSaveBtn" class="btn btn-sm" type="button">Save</button>
+    </div>
+  </dialog>
+
+  <dialog id="charDlg" class="mc-dialog">
+    <h3 id="charDlgTitle">Character</h3>
+    <div class="dlg-grid">
+      <label>Name <input id="cName"></label>
+      <label>Server <input id="cServer" value="Frostreaver"></label>
+      <label>Account <select id="cAccount"></select></label>
+      <label>Class <select id="cClass"></select></label>
+      <label>Level <input id="cLevel" type="number" min="1" max="125"></label>
+      <label>Race <select id="cRace"></select>
+        <span id="cRaceHint" class="hint"></span></label>
+      <label>Main role <select id="cRole">
+        <option value=""></option><option>tank</option><option>healer</option><option>dps</option>
+        <option>support</option><option>puller</option><option>box</option>
+      </select></label>
+      <label>Status <select id="cStatus">
+        <option>active</option><option>parked</option><option>planned</option><option>retired</option>
+      </select></label>
+      <label>Group tags <input id="cTags" placeholder="core, raid, farm"></label>
+      <label>Gear tier <input id="cGear" placeholder="banded / kunark / velious"></label>
+      <label>Epic <select id="cEpic">
+        <option value=""></option><option>none</option><option>in-progress</option><option>complete</option>
+      </select></label>
+      <label>Automation <select id="cAuto">
+        <option>untested</option><option>partial</option><option>tested</option><option>manual-only</option>
+      </select></label>
+      <label class="checkline"><input id="cPortbot" type="checkbox"> Port-bot whitelist</label>
+      <label class="wide">Notes <textarea id="cNotes" rows="2"></textarea></label>
+    </div>
+    <h4>Capabilities <span class="hint">click to cycle: class default → forced ON → forced OFF</span></h4>
+    <div id="capsGrid" class="caps-grid"></div>
+    <h4>Saved to raids</h4>
+    <div id="lockChecks" class="lock-checks"></div>
+    <div class="dlg-actions">
+      <button id="cDeleteBtn" class="btn btn-ghost btn-sm danger" type="button">Delete</button>
+      <span class="grow"></span>
+      <button class="btn btn-ghost btn-sm dlg-cancel" type="button">Cancel</button>
+      <button id="cSaveBtn" class="btn btn-sm" type="button">Save</button>
+    </div>
+  </dialog>
+
+  <dialog id="launchDlg" class="mc-dialog">
+    <h3>Launch plan</h3>
+    <p class="hint">Boot the clients in this order and pick these characters in MQ AutoLogin.
+      "📤 Push login set" writes the same list to <code>mychars_loginset.lua</code> in the MQ config
+      folder, if you have a script that reads it.</p>
+    <div id="launchList"></div>
+    <div class="dlg-actions">
+      <span class="grow"></span>
+      <button class="btn btn-sm dlg-cancel" type="button">Done</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="mc-toast" hidden></div>
+  <script src="mychars.js"></script>
+</body>
+</html>

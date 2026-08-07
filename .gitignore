@@ -1,0 +1,48 @@
+# EQ Forge 2.0 — repo-local ignores.
+#
+# This file has to live HERE, not in a parent folder: when eqforge2 is its own git
+# repo, rules written as "eqforge2/mychars.db" one level up don't apply to anything.
+# Without this file a public push would publish a real 46-character roster and
+# Daybreak's game text on the first commit.
+
+# ---- personal data -----------------------------------------------------------
+# The roster DB: real character names, account aliases, launch order, lockouts.
+mychars.db
+mychars.db.bak-*
+*.db-wal
+*.db-shm
+
+# Resolved EverQuest / MacroQuest folder paths for one machine. Every install
+# auto-detects its own; a committed override would beat that detection.
+eqforge_settings.json
+
+# Toon labels (name/class/race/level) used by the Upgrade Finder. The
+# .example.json is the one that ships.
+app/toon-profiles.json
+
+# ---- other people's content --------------------------------------------------
+# Generated from YOUR OWN EverQuest client's spells_us.txt + dbstr_us.txt. The
+# contents are Daybreak's game text, so they are not ours to redistribute.
+# Regenerate locally with: python tools/build_spells.py
+# Both loaders are non-fatal — without them, effect labels degrade to types only.
+app/spell-effects.json.gz
+app/focus-families.json
+
+# ---- build junk --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+
+# ---- OS / editor -------------------------------------------------------------
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# ---- private working notes ---------------------------------------------------
+# Session log / learnings. Full of real character names, machine paths and
+# personal context; build_zip.py excludes it from releases for the same reason.
+CLAUDE.md
+AGENTS.md
+GEMINI.md
