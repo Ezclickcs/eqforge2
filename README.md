@@ -108,6 +108,28 @@ and the comp you apply decides who wears it.
 - Server filter on the inventory dumps — TLP prices are per-server, so two servers merged into one
   list value each other's gear.
 
+*In-game (MacroQuest) — addon **1.4.0**, mailgear **1.2.0**. Copy `extras/` over your existing
+install; a running client keeps the old Lua until the version changes:*
+- **The Dragon's Hoard dump guard.** `/outputfile inventory` rewrites the whole file, and Hoard /
+  Depot rows only export while that window is **open** — so every dump taken away from a banker
+  silently replaced a full hoard record with nothing. The addon now reads those rows into memory
+  first and splices them back: *replace*, never append (the app sums counts, so a duplicated row
+  inflates what you appear to own), and *splice*, never whole-file restore (which threw away the
+  refresh you asked for). It reports `kept N Hoard/Depot row(s) this dump would have wiped`.
+- **Carried-forward hoard rows are dated honestly.** Spliced rows keep their original capture time in
+  a `-Inventory.hoardasof` sidecar, so a fresh file mtime can't make month-old hoard data read as
+  current. The harvest report shows the real age; no stamp reads as "unknown" rather than guessing.
+- **mailgear equips gear the toon already has.** It read `moves` — only the pieces some *other*
+  character hands over — so a piece already sitting in the target's own bags was skipped entirely
+  and never got worn. It now reads `rows` (every piece the set calls for) and handles `have`
+  (own bags), `grab` (own shared bank) and `worn`, where an already-correct piece reserves its slot
+  so the equip step can't overwrite it. Older plan exports without `rows` still work unchanged.
+- **mailgear trusts the exporter's location buckets** instead of matching strings itself. A Personal
+  Tradeskill Depot location fell through to "other" and got queued for equipping from a place the
+  script cannot reach.
+- `/eqf` and the bank-run script honour the same hoard guard; a hoard-tagged character whose window
+  never opened now refuses to dump rather than writing an empty record over a good one.
+
 **1.8.0** — ⚙ Setup tab (auto-detects both folders; no more environment variables, no more features
 silently returning nothing because a path was wrong) · **MacroQuest addon** that exports roster,
 expedition lockouts and inventory automatically on `/camp` · fresh installs start with an empty roster
