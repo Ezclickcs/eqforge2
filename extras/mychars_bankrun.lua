@@ -91,7 +91,73 @@ else
 end
 
 -- 5. snapshot (includes bank + hoard because the windows are open)
+--
+-- GUARDED. /outputfile rewrites the whole file and Hoard rows only export while the
+-- window is OPEN, so if the hoard failed to open above (the 10s hand-open expired, or
+-- this toon has none) a bare dump would replace a good hoard-bearing dump with an
+-- empty one - the exact loss this script exists to prevent. Read the old rows into
+-- memory FIRST; splice them back if the fresh dump came up empty.
+-- Mirrors the guards in extras/eqforge/init.lua and trixbox's dumpInvGuarded().
+local function isWindowOnlyLoc(loc)
+    return loc:sub(1, 5) == 'Hoard' or loc:sub(1, 6) == 'Dragon'
+        or loc:sub(1, 5) == 'Depot' or loc:sub(1, 8) == 'Personal'
+end
+
+local dumpPath
+do
+    local eqdir, srv, nm = '', '', ''
+    pcall(function() eqdir = tostring(mq.TLO.EverQuest.Path() or '') end)
+    pcall(function() srv   = tostring(mq.TLO.EverQuest.Server() or '') end)
+    pcall(function() nm    = tostring(mq.TLO.Me.Name() or '') end)
+    if eqdir ~= '' and nm ~= '' then
+        dumpPath = string.format('%s/%s_%s-Inventory.txt', eqdir, nm, srv:lower())
+    end
+end
+
+local function readWindowOnly(path)
+    local lines, n = {}, 0
+    local f = path and io.open(path, 'r')
+    if not f then return lines, 0 end
+    for line in f:lines() do
+        local loc, name = line:match('^([^\t]+)\t([^\t]*)')
+        if loc and isWindowOnlyLoc(loc) then
+            table.insert(lines, line)
+            if name ~= 'Empty' and name ~= '' then n = n + 1 end
+        end
+    end
+    f:close()
+    return lines, n
+end
+
+local prevRows, prevN = readWindowOnly(dumpPath)
+
 mq.cmd('/outputfile inventory')
 mq.delay(500)
+
+local _, nowN = readWindowOnly(dumpPath)
+if prevN > 0 and nowN == 0 and dumpPath then
+    local f = io.open(dumpPath, 'r')
+    local kept = {}
+    if f then
+        for line in f:lines() do
+            local loc = line:match('^([^\t]+)')
+            if not (loc and isWindowOnlyLoc(loc)) then table.insert(kept, line) end
+        end
+        f:close()
+        for _, l in ipairs(prevRows) do table.insert(kept, l) end
+        local out = io.open(dumpPath, 'w')
+        if out then
+            out:write(table.concat(kept, '\n'), '\n')
+            out:close()
+            nowN = prevN
+            fail(("Hoard didn't open - KEPT the %d Hoard row(s) from the previous dump. "
+                  .. 'Bank/bags are fresh; hoard rows are from the last visit.'):format(prevN))
+        end
+    end
+elseif nowN > 0 and dumpPath then
+    local st = io.open((dumpPath:gsub('%-Inventory%.txt$', '-Inventory.hoardasof')), 'w')
+    if st then st:write(tostring(os.time()), '\n'); st:close() end
+end
+
 log('Inventory dumped WITH bank%s. Refresh the Gear tab.',
-    mq.TLO.Window('DragonHoardWnd').Open() and " + Dragon's Hoard" or '')
+    nowN > 0 and " + Dragon's Hoard" or '')

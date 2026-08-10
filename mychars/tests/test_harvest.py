@@ -83,6 +83,13 @@ class _World(unittest.TestCase):
                       "w", encoding="utf-8") as f:
                 f.writelines(lines)
 
+    def hoard_stamp(self, name, at):
+        """The sidecar the dump guards write when Hoard rows are captured LIVE."""
+        p = os.path.join(self.eq_dir, "%s_frostreaver%s" % (name, harvest.HOARD_STAMP_SUFFIX))
+        with open(p, "w", encoding="latin-1") as f:
+            f.write("%d\n" % at)
+        return p
+
     def cover(self, chars, **kw):
         run = harvest.read_runs(self.mq_dir)
         return harvest.coverage(self.eq_dir, chars, run=run, now=NOW, **kw)
@@ -166,6 +173,62 @@ class StatusTests(_World):
         """Most toons have no Hoard at all — absence must not be a fault."""
         self.dump("Plain", full_dump(), mtime=NOW - 60)
         self.assertEqual(self.status_of(self.cover([self.char("Plain")]), "Plain"), "ok")
+
+
+class HoardFreshnessTests(_World):
+    """A dump whose Hoard rows were SPLICED forward by the dump guards has a fresh
+    mtime but stale hoard data. Without the sidecar stamp the report would call that
+    "ok" — the one thing this report must never do (reported 2026-08-09)."""
+
+    def hoarder(self, name="Vaypur"):
+        return self.char(name, tags="banker,hoard")
+
+    def test_live_hoard_capture_reads_ok(self):
+        self.dump("Vaypur", full_dump(extra=[line("Hoard 1", "Sarnak Prayer Beads", 5773)]),
+                  mtime=NOW - 600)
+        self.hoard_stamp("Vaypur", NOW - 600)
+        self.assertEqual(self.status_of(self.cover([self.hoarder()]), "Vaypur"), "ok")
+
+    def test_carried_forward_hoard_is_reported_stale_even_though_the_dump_is_fresh(self):
+        self.dump("Vaypur", full_dump(extra=[line("Hoard 1", "Sarnak Prayer Beads", 5773)]),
+                  mtime=NOW - 600)                      # dumped 10 minutes ago...
+        self.hoard_stamp("Vaypur", NOW - 30 * 24 * 3600)   # ...hoard last SEEN a month ago
+        res = self.cover([self.hoarder()])
+        row = next(r for r in res["rows"] if r["name"] == "Vaypur")
+        self.assertEqual(row["status"], "stale")
+        self.assertIn("carried forward", row["note"])
+        self.assertLess(row["dump_age_h"], 2)           # the dump really is fresh
+        self.assertGreater(row["hoard_age_h"], 600)     # the hoard rows are not
+
+    def test_no_stamp_means_no_claim_either_way(self):
+        """Dumps written before the guards existed have no sidecar. Absence must not
+        invent staleness — it just leaves hoard age unknown."""
+        self.dump("Vaypur", full_dump(extra=[line("Hoard 1", "Sarnak Prayer Beads", 5773)]),
+                  mtime=NOW - 600)
+        row = next(r for r in self.cover([self.hoarder()])["rows"] if r["name"] == "Vaypur")
+        self.assertIsNone(row["hoard_asof"])
+        self.assertIsNone(row["hoard_age_h"])
+        self.assertEqual(row["status"], "ok")
+
+    def test_an_old_stamp_does_not_downgrade_a_toon_with_no_hoard_rows(self):
+        """Only rows actually PRESENT in the dump can be stale. A toon whose hoard is
+        genuinely empty already has its own status and must not be double-flagged."""
+        self.dump("Vaypur", full_dump(), mtime=NOW - 600)
+        self.hoard_stamp("Vaypur", NOW - 30 * 24 * 3600)
+        # tagged `hoard` with zero Hoard rows is the pre-existing, more specific fault
+        self.assertEqual(self.status_of(self.cover([self.hoarder()]), "Vaypur"),
+                         "hoard-missed")
+        # ...and an untagged toon stays ok
+        self.assertEqual(self.status_of(self.cover([self.char("Vaypur")]), "Vaypur"), "ok")
+
+    def test_unreadable_stamp_is_ignored(self):
+        self.dump("Vaypur", full_dump(extra=[line("Hoard 1", "Beads", 5773)]), mtime=NOW - 600)
+        p = os.path.join(self.eq_dir, "Vaypur_frostreaver" + harvest.HOARD_STAMP_SUFFIX)
+        with open(p, "w", encoding="latin-1") as f:
+            f.write("not a number\n")
+        row = next(r for r in self.cover([self.hoarder()])["rows"] if r["name"] == "Vaypur")
+        self.assertIsNone(row["hoard_asof"])
+        self.assertEqual(row["status"], "ok")
 
 
 class RunLogTests(_World):

@@ -50,7 +50,7 @@ already made it.
 
 local mq = require('mq')
 
-local VERSION = '1.1.1'   -- BUMP THIS on every functional change. MQ loads a Lua
+local VERSION = '1.4.0'   -- BUMP THIS on every functional change. MQ loads a Lua
                           -- script ONCE at start, so a client that was already
                           -- running keeps the old code after you copy a new file
                           -- in. Without a version you can read, that is invisible:
@@ -372,15 +372,62 @@ end
 --- Rows only capturable with a window OPEN: the Dragon's Hoard and the Personal
 --- Tradeskill Depot. Bank and SharedBank arrive in the login packet and need
 --- nothing; these two do not.
+--- Mirrors mychars/gear.py loc_bucket: hoard = Hoard*/Dragon*, depot = Depot*/Personal*.
+--- Real locations carry a space ("Hoard 1", "Hoard 1-Slot1"), so match on the prefix.
+local function isWindowOnlyLoc(loc)
+    return loc:sub(1, 5) == 'Hoard' or loc:sub(1, 6) == 'Dragon'
+        or loc:sub(1, 5) == 'Depot' or loc:sub(1, 8) == 'Personal'
+end
+
+--- Counts only rows holding something. An empty hoard slot still prints a row, and
+--- counting those made a wiped hoard look populated.
 local function countWindowOnly(text)
     local n = 0
     for line in (text or ''):gmatch('[^\r\n]+') do
-        local loc = line:match('^([^\t]+)')
-        if loc and (loc:find('Hoard', 1, true) or loc:find('Depot', 1, true)) then
+        local loc, name = line:match('^([^\t]+)\t([^\t]*)')
+        if loc and isWindowOnlyLoc(loc) and name ~= 'Empty' and name ~= '' then
             n = n + 1
         end
     end
     return n
+end
+
+--- Every window-only line of `text`, verbatim.
+local function windowOnlyLines(text)
+    local out = {}
+    for line in (text or ''):gmatch('[^\r\n]+') do
+        local loc = line:match('^([^\t]+)')
+        if loc and isWindowOnlyLoc(loc) then table.insert(out, line) end
+    end
+    return out
+end
+
+--- Put `saved` window-only rows back into the dump at `path`, REPLACING whatever
+--- window-only rows the fresh dump has (never appending - the app sums counts, so a
+--- duplicated row inflates what you appear to own).
+local function spliceWindowOnly(path, saved)
+    local f = io.open(path, 'r')
+    if not f then return false, 'dump file vanished' end
+    local kept = {}
+    for line in f:lines() do
+        local loc = line:match('^([^\t]+)')
+        if not (loc and isWindowOnlyLoc(loc)) then table.insert(kept, line) end
+    end
+    f:close()
+    for _, l in ipairs(saved) do table.insert(kept, l) end
+    local out = io.open(path, 'w')
+    if not out then return false, 'could not reopen the dump for writing' end
+    out:write(table.concat(kept, '\n'), '\n')
+    out:close()
+    return true
+end
+
+--- When hoard rows were last captured FOR REAL (window open). Restored rows keep the
+--- old stamp, so the app can age them honestly instead of trusting the merged file's
+--- fresh mtime.
+local function writeHoardStamp(path)
+    local f = io.open((path:gsub('%-Inventory%.txt$', '-Inventory.hoardasof')), 'w')
+    if f then f:write(tostring(os.time()), '\n'); f:close() end
 end
 
 local function readFile(path)
@@ -449,20 +496,28 @@ local function exportDump(budgetS, force)
 
     -- Did this dump throw away hoard/depot rows the previous one had?
     local nowWindowOnly = countWindowOnly(readFile(path))
+    if nowWindowOnly > 0 then
+        writeHoardStamp(path)                        -- captured live, window was open
+    end
     if prevWindowOnly > 0 and nowWindowOnly == 0 and not force then
-        local f = io.open(path, 'w')                 -- put the good dump back
-        if f then
-            f:write(prevText)
-            f:close()
-            warn('KEPT the older dump: it had %d Hoard/Depot row(s) this one would have '
-                 .. 'wiped.', prevWindowOnly)
-            info('Those only export with the window OPEN. Park at a banker, open the '
-                 .. "Dragon's Hoard / Tradeskill Depot, then /eqf dump.")
-            info('To overwrite anyway (e.g. you emptied it): /eqf dump force')
-            return true, string.format('unchanged - protected %d Hoard/Depot row(s)',
-                                       prevWindowOnly)
+        -- SPLICE, don't restore the whole file. The old behaviour rewrote `prevText`
+        -- wholesale, which protected the hoard but silently threw away the refresh you
+        -- had just asked for - worn/bags/bank all reverted to the older snapshot. Only
+        -- the window-only rows actually need rescuing (reported 2026-08-09).
+        local ok2, err2 = spliceWindowOnly(path, windowOnlyLines(prevText))
+        if ok2 then
+            warn('kept %d Hoard/Depot row(s) this dump would have wiped.', prevWindowOnly)
+            info('Those only export with the window OPEN. Everything else in the dump is '
+                 .. 'freshly refreshed; the hoard rows are as of the last bank visit.')
+            info('To drop them anyway (e.g. you emptied it): /eqf dump force')
+            return true, string.format('%s - protected %d Hoard/Depot row(s)',
+                                       detail or 'refreshed', prevWindowOnly)
         end
-        warn('could not restore the previous dump at %s', path)
+        warn('could not splice the hoard rows back into %s (%s) - restoring the whole '
+             .. 'previous dump instead so nothing is lost.', path, tostring(err2))
+        local f = io.open(path, 'w')
+        if f then f:write(prevText); f:close()
+        else warn('could not restore the previous dump at %s', path) end
     elseif prevWindowOnly > 0 and nowWindowOnly < prevWindowOnly / 2 then
         -- Contents STREAM in after the window opens; dumping too early captures a
         -- partial hoard that still looks like a real one. Loud, but not blocking.
@@ -574,7 +629,37 @@ end
 -- ---------------------------------------------------------------------------
 -- jobs  -  the only things the main loop ever runs
 -- ---------------------------------------------------------------------------
-local lastRun = { roster = 0, lockouts = 0, dump = 0 }
+local lastRun = { roster = 0, lockouts = 0, dump = 0, achievements = 0 }
+
+--- /outputfile achievements -> <Name>_<server>-Achievements.txt in the EQ folder.
+---
+--- Moved here from TrixBox 2026-08-09. Achievements are the authoritative record of
+--- keys and flags (Sleeper's Key and friends) and NOTHING in the public addon exported
+--- them - only TrixBox, which no one outside the user's box runs, and harvest_step, which
+--- only runs during a harvest. So every tester's key/flag data was silently empty.
+---
+--- Unlike the inventory dump this needs no settle delay or completeness gate: verified
+--- 2026-08-07 across three toons, the file is fully written at export time (22.8-22.9k
+--- lines each, statuses differentiating correctly). There is also nothing window-only
+--- in it, so no hoard-style guard is required.
+local function exportAchievements()
+    local name = tloStr(mq.TLO.Me.Name)
+    if name == '' then return false, 'not in game' end
+    mq.cmd('/outputfile achievements')
+    return true, string.format('%s_%s-Achievements.txt', name,
+                               tloStr(mq.TLO.EverQuest.Server):lower())
+end
+
+local function runAchievements()
+    local ok, detail = exportAchievements()
+    if ok then
+        lastRun.achievements = os.time()
+        say('achievements: %s', detail)
+    else
+        warn('achievements export failed: %s', detail)
+    end
+    return ok
+end
 
 local function runRoster()
     local ok, detail = exportRoster()
@@ -629,6 +714,7 @@ end
 local function runAll(budgetS)
     runRoster()
     runLockouts()
+    runAchievements()
     runDump(budgetS)
     runBeacon(false)
 end
@@ -705,7 +791,11 @@ local function showStatus()
         and string.format('\ag%d min\ax', settings.every) or '\ayoff\ax')
     printf('  last roster    : %s', ago(lastRun.roster))
     printf('  last lockouts  : %s', ago(lastRun.lockouts))
-    printf('  last inventory : %s', ago(lastRun.dump))
+    printf('  last achieve.  : %s', ago(lastRun.achievements))
+    -- "never" here is NORMAL on a toon that has not camped yet: loginDump defaults OFF
+    -- because login is the noisy moment, so the login export is roster + lockouts only.
+    printf('  last inventory : %s%s', ago(lastRun.dump),
+           lastRun.dump == 0 and ' (camp to get one - login does not dump by default)' or '')
     printf('  autostart      : %s', autostartInstalled()
         and '\agingame.cfg\ax' or '\aroff - stops when you camp\ax')
     printf('  MQ config      : %s', mq.configDir)
@@ -852,7 +942,7 @@ local function main(...)
 
     info('EQ Forge addon v%s loaded. /eqf for commands.', VERSION)
     if settings.camp then
-        say('auto-export on /camp is ON - roster, lockouts and inventory.')
+        say('auto-export on /camp is ON - roster, lockouts, achievements and inventory.')
     else
         say('auto-export on /camp is off (/eqf on camp to enable).')
     end

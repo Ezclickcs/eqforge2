@@ -85,6 +85,29 @@ at a glance.
 
 ## Version history
 
+**1.9.0** — **Comps drive gear sets.** A composition now records which loadout it fields for each
+member, and one button makes that comp's sets the only active ones. A gear set is a *role loadout*,
+not a character's property: the same "Rogue Main" goes on Gavriel in one comp and Zyrak in another,
+and the comp you apply decides who wears it.
+
+*Fixes, and one of them destroyed data:*
+- **Saving a gear set could DELETE another set's picks.** If two active sets wanted more copies of an
+  item than you own, the save silently ran `DELETE FROM gear_set_items` against the other set. If you
+  have been using gear sets, check your older sets for slots that emptied themselves — and note that
+  `tools/carve_deleted_gearset_rows.py` can often recover deleted rows from the database's free pages
+  if you have not vacuumed. Contention is now *reported* and every set keeps its picks.
+- **Picks with no slot were invisible but still claimed items.** Sets imported from the Macro Builder
+  could carry picks with an empty slot; the editor draws one row per slot, so those never appeared
+  while the planner went on reserving their gear. Slots are now inferred from the item on save, the
+  editor shows any leftover as a "no slot" row you can remove, and
+  `tools/fix_unslotted_gearset_rows.py` repairs an existing database.
+- **Corpse dumps were loaded as characters.** `Vexrin's corpse0_frostreaver-Inventory.txt` parsed as a
+  toon named "Vexrin's corpse0" and its items counted as gear you own. Ignored everywhere now.
+- **A redundant Avatar slot no longer shops for a spare.** Naming the same weapon in both 2-Hander and
+  Avatar told you to log in another character and mail a second copy over for nothing.
+- Server filter on the inventory dumps — TLP prices are per-server, so two servers merged into one
+  list value each other's gear.
+
 **1.8.0** — ⚙ Setup tab (auto-detects both folders; no more environment variables, no more features
 silently returning nothing because a path was wrong) · **MacroQuest addon** that exports roster,
 expedition lockouts and inventory automatically on `/camp` · fresh installs start with an empty roster

@@ -28,7 +28,7 @@ import os
 import re
 import time
 
-from .gear import loc_bucket
+from .gear import is_character_dump, loc_bucket
 
 DUMP_SUFFIX = "-Inventory.txt"
 RUN_PREFIX = "harvest_"
@@ -319,6 +319,24 @@ def _status(scan, mtime, attempt, run_started, now, stale_h, wants_hoard):
     return "ok", ""
 
 
+HOARD_STAMP_SUFFIX = "-Inventory.hoardasof"
+
+
+def _hoard_asof(dump_path):
+    """Epoch when this toon's Hoard/Depot rows were last captured with the window
+    OPEN, or None. Written by the dump guards (extras/eqforge/init.lua,
+    extras/mychars_bankrun.lua, trixbox's dumpInvGuarded) and deliberately NOT
+    refreshed when rows are spliced forward — that is the whole point of it."""
+    if not dump_path or not dump_path.endswith(DUMP_SUFFIX):
+        return None
+    stamp = dump_path[:-len(DUMP_SUFFIX)] + HOARD_STAMP_SUFFIX
+    try:
+        with open(stamp, encoding="latin-1") as f:
+            return int((f.readline() or "").strip())
+    except (OSError, ValueError):
+        return None
+
+
 def _age_label(hours):
     if hours < 48:
         return "%d hour%s" % (hours, "" if hours == 1 else "s")
@@ -345,7 +363,9 @@ def coverage(eq_dir, chars, run=None, now=None, stale_h=DEFAULT_STALE_H):
                 continue
             base = fn[:-len(DUMP_SUFFIX)]
             name, _, server = base.partition("_")
-            if name:
+            # skip corpse dumps ("Vexrin's corpse0_frostreaver-Inventory.txt"), which
+            # otherwise land in orphan_dumps and read as roster members we never imported
+            if is_character_dump(name, server):
                 dumps[(name.lower(), server.lower())] = os.path.join(eq_dir, fn)
 
     rows, matched = [], set()
@@ -362,7 +382,20 @@ def coverage(eq_dir, chars, run=None, now=None, stale_h=DEFAULT_STALE_H):
         attempt = attempted.get(key[0])
         tags = (c.get("group_tags") or "").lower()
         wants_hoard = HOARD_TAG in tags
+        hoard_asof = _hoard_asof(path)
         status, note = _status(scan, mtime, attempt, run_started, now, stale_h, wants_hoard)
+        # A dump whose hoard rows were SPLICED back by the dump guards has a fresh
+        # mtime but old hoard data, so mtime alone would report stale rows as current.
+        # The writers stamp a sidecar when the hoard is captured live; anything much
+        # older than the dump itself is carried-forward data and says so.
+        hoard_age_h = None if hoard_asof is None else max(0, (now - hoard_asof) // 3600)
+        if (status == "ok" and hoard_age_h is not None
+                and (scan or {}).get("items", {}).get("hoard", 0) > 0
+                and hoard_age_h >= stale_h):
+            status = "stale"
+            note = ("bags/bank are current, but the Hoard rows are %s old — they were "
+                    "carried forward from the last bank visit, not re-read"
+                    % _age_label(hoard_age_h))
         rows.append({
             "character_id": c.get("id"), "name": c.get("name"), "server": c.get("server"),
             "account_id": c.get("account_id"), "account_alias": c.get("account_alias"),
@@ -370,6 +403,10 @@ def coverage(eq_dir, chars, run=None, now=None, stale_h=DEFAULT_STALE_H):
             "status": status, "note": note, "wants_hoard": wants_hoard,
             "dump_mtime": mtime,
             "dump_age_h": None if mtime is None else (now - mtime) // 3600,
+            # When the Hoard/Depot rows were last read with the window OPEN. Diverges
+            # from dump_age_h once a guard splices old rows into a fresh dump.
+            "hoard_asof": hoard_asof,
+            "hoard_age_h": hoard_age_h,
             "attempted": bool(attempt),
             "attempt_result": (attempt or {}).get("result"),
             "total_rows": (scan or {}).get("total_rows", 0),

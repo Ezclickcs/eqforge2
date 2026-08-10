@@ -47,8 +47,10 @@
           <span class="grow"></span>
           <button id="lsValidateBtn" class="btn btn-ghost btn-sm" type="button">Validate Group</button>
           <button id="lsBuilderBtn" class="btn btn-ghost btn-sm" type="button">Open in Comp Builder</button>
+          <input id="lsGroupName" class="ls-group" placeholder="eqf login set"
+            title="AutoLogin profile group to write. Stored lowercase — that's how the loader looks groups up. Use a name of your own to keep several sets around.">
           <button id="lsPushBtn" class="btn btn-ghost btn-sm" type="button"
-            title="OPTIONAL — requires MacroQuest. Writes this login set to mychars_loginset.lua in MQ's config folder so an in-game script can read it. Harmless if nothing reads it.">📤 Push login set</button>
+            title="Writes this login set into MQ AutoLogin as a profile group (login.db), in launch order, so you can right-click the MQ tray icon → Profiles → Launch All. Close the MQ loader first — it caches the profile list, so a write while it's running is invisible to it. Backs up login.db (+ its WAL) first and never touches your account/password table. Also writes mychars_loginset.lua for in-game scripts.">📤 Push login set</button>
           <button id="lsLaunchBtn" class="btn btn-sm" type="button">Launch Group</button>
         </div>
         <div id="loginSetRow" class="loginset-row"></div>
@@ -111,6 +113,7 @@
             <input id="compNotes" placeholder="Notes">
             <input id="compReq" list="reqDatalist" placeholder="Required access (comma list, e.g. Sebilis Key)">
             <datalist id="reqDatalist"></datalist>
+
           </div>
           <div class="autofill">
             <span class="hint">Must have:</span>
@@ -131,6 +134,14 @@
           <div id="benchGrid" class="slot-grid"></div>
           <div id="warnPanel" class="warn-panel"></div>
           <div id="gearCheckPanel" class="warn-panel"></div>
+          <div id="compApplyPanel" class="warn-panel"></div>
+          <div class="mc-cardhead" style="margin-top:8px">
+            <button id="compApplyBtn" class="btn btn-sm" type="button"
+              title="Make this comp's gear sets the only ACTIVE ones. Everything else is deactivated — no picks are cleared, and applying another comp puts it straight back. Active is what decides which sets compete for copies and which get routed into the move plan, so it only means anything when it is one comp.">🎯 Apply this comp's gear sets</button>
+            <span class="grow"></span>
+            <button id="compGearBtn" class="btn btn-sm" type="button"
+              title="Open these six in Gear Sets: every member's set, what they already have on, what still has to be moved to them, and what nobody can deliver.">🎁 Check this comp's gear</button>
+          </div>
         </section>
         <section class="card mc-card">
           <div class="mc-cardhead">
@@ -233,6 +244,22 @@
 
     <!-- ============ GEAR SETS (planner moved here from the Macro Builder) ============ -->
     <div id="mtab-sets" hidden>
+      <section class="card mc-card" id="gsCompCard">
+        <div class="mc-cardhead">
+          <h2>Comp gear check</h2>
+          <span class="hint">can I field this six right now — per member: set, what's on them, what's still coming</span>
+          <span class="grow"></span>
+          <select id="gsCompPick" title="Saved compositions — the live six only (bench toons swap in later and aren't judged here)">
+            <option value="">— pick a saved comp —</option>
+          </select>
+          <button id="gsCompRunBtn" class="btn btn-sm" type="button"
+            title="Route every active set on the roster (so nothing gets double-promised), then report only this comp's six.">🎁 Check comp gear</button>
+          <button id="gsCompClearBtn" class="btn btn-ghost btn-sm" type="button" hidden
+            title="Drop the comp focus — back to every set and the whole-roster move plan">✕ clear focus</button>
+        </div>
+        <div id="gsCompOut"><div class="hint">Pick a saved comp, or hit <b>🎁 Check this comp's gear</b> in the Comp Builder to bring the six you're editing over here. Dumps are read fresh — refresh them in game first (/outputfile inventory, or /eqf dump).</div></div>
+      </section>
+
       <section class="card mc-card">
         <div class="mc-cardhead">
           <h2>Gear Sets</h2>
@@ -277,8 +304,9 @@
         <div id="gsEdTotals" class="gs-totals"></div>
         <div class="hint" style="margin-bottom:6px">
           Click a slot on the left to see <b>everything you own across all toons</b> (worn, bags,
-          bank, shared, hoard, persona) that the class can wear. Grayed = every copy is already
-          claimed by another active set. ⛔ = No Trade, LORE noted.
+          bank, shared, hoard, persona) that the class can wear. An amber stripe = another active
+          set already picked it — you can still pick it here and <b>neither set loses anything</b>;
+          the move plan says which toon can actually get a copy. ⛔ = No Trade, LORE noted.
         </div>
         <div class="gs-ed2">
           <div class="gs-ed-slots">
@@ -302,7 +330,7 @@
                   <option value="name">name</option>
                 </select>
               </label>
-              <label class="hint" title="Hide pieces where every copy is already claimed by another active set">
+              <label class="hint" title="Hide pieces another active set already picked — a view filter only, it never stops you picking one">
                 <input type="checkbox" id="gsCandFree"> free only
               </label>
             </div>
@@ -316,7 +344,7 @@
       <section class="card mc-card">
         <div class="mc-cardhead">
           <h2>Move Plan</h2>
-          <span class="hint">every ACTIVE set, routed by real cost — your shared bank beats a swap beats a parcel · uses the Current Login Set for trade-now routing</span>
+          <span class="hint" id="gsPlanScope">every ACTIVE set, routed by real cost — your shared bank beats a swap beats a parcel · uses the Current Login Set for trade-now routing</span>
           <span class="grow"></span>
           <label class="hint" title="Moves routed from a dump older than this are flagged — the holder may not still have the item">don't trust dumps over
             <select id="gsStale">
@@ -521,8 +549,9 @@
   <dialog id="launchDlg" class="mc-dialog">
     <h3>Launch plan</h3>
     <p class="hint">Boot the clients in this order and pick these characters in MQ AutoLogin.
-      "📤 Push login set" writes the same list to <code>mychars_loginset.lua</code> in the MQ config
-      folder, if you have a script that reads it.</p>
+      Or use "📤 Push login set" (with the MQ loader closed) to write this exact list into
+      AutoLogin as a profile group — then right-click the MQ tray icon → Profiles → your group →
+      Launch All and it boots them in this order for you.</p>
     <div id="launchList"></div>
     <div class="dlg-actions">
       <span class="grow"></span>

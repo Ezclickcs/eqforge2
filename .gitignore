@@ -28,6 +28,11 @@ app/toon-profiles.json
 app/spell-effects.json.gz
 app/focus-families.json
 
+# One-off repair written against MATT'S rows (specific set names, specific item
+# ids). Useless to anyone else and it names real characters. The generic siblings
+# -- carve_deleted_gearset_rows.py, fix_unslotted_gearset_rows.py -- do ship.
+tools/restore_stolen_gearset_picks.py
+
 # ---- build junk --------------------------------------------------------------
 __pycache__/
 *.py[cod]

@@ -32,6 +32,8 @@ a.viewtab { text-decoration: none; display: inline-block; }
 
 /* current login set */
 .loginset-card { border-left: 3px solid var(--accent); }
+.ls-group { width: 150px; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 6px; font-size: 12px; }
 .loginset-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 @media (max-width: 1000px) { .loginset-row { grid-template-columns: repeat(3, 1fr); } }
 .ls-slot {
@@ -212,6 +214,16 @@ tr.detailrow td { background: var(--surface-2); padding: 10px 14px 12px; border-
 .warn.info { color: var(--info); border-color: rgba(56,189,248,.3); background: rgba(56,189,248,.06); }
 .warn.ok { color: var(--accent); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.07); }
 
+/* which gear set a comp fields per member (the Apply panel) */
+.ca-box {
+  display: flex; flex-direction: column; gap: 4px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.ca-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; flex-wrap: wrap; }
+.ca-row-ask { box-shadow: inset 3px 0 0 var(--warn); padding-left: 7px; }
+.ca-name { min-width: 92px; font-weight: 600; }
+.ca-pick { max-width: 260px; }
+
 .picker-list { display: flex; flex-direction: column; gap: 6px; max-height: 70vh; overflow-y: auto; }
 .pick {
   display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: var(--radius-sm);
@@ -365,6 +377,11 @@ tr.detailrow td { background: var(--surface-2); padding: 10px 14px 12px; border-
 }
 #gsSnapName { width: 190px; }
 .gs-retired td { opacity: .5; }
+.gs-tag {
+  width: 130px; font-size: 11px; padding: 1px 5px; background: var(--surface-2);
+  color: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.gs-tag:focus { color: var(--text); }
 .gs-assign { max-width: 240px; background: var(--surface-2); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 6px; font-size: 12px; }
 
@@ -383,6 +400,17 @@ tr.detailrow td { background: var(--surface-2); padding: 10px 14px 12px; border-
   background: var(--surface-2); border: 1px solid var(--border-strong); }
 .gs-chip.gs-ok, .gs-chip.gs-free, .gs-chip.gs-swap, .gs-chip.gs-trade,
 .gs-chip.gs-parcel, .gs-chip.gs-bad { font-weight: 600; }
+
+/* Comp gear check — one row per live member, colour-coded by how far from ready */
+#gsCompPick { max-width: 240px; background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 6px; font-size: 12px; }
+.gsc-table td { vertical-align: top; }
+.gsc-table tr td:first-child { border-left: 3px solid transparent; }
+.gsc-ready   td:first-child { border-left-color: var(--accent); }
+.gsc-onhand  td:first-child { border-left-color: #38bdf8; }
+.gsc-moves   td:first-child { border-left-color: #a78bfa; }
+.gsc-blocked td:first-child { border-left-color: var(--danger); }
+.gsc-noset   td:first-child { border-left-color: #f59e0b; }
 
 .gs-h { margin: 14px 0 6px; font-size: 13px; color: var(--muted); }
 .gs-workgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }

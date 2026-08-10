@@ -58,7 +58,7 @@ const API_HOST = "https://tlp-auctions.com/api";
 const SERVER = "Frostreaver";    // only TLP with tlp-auctions data; no server picker needed
 // Bump on any user-visible change — the header badge is how you confirm the browser
 // actually loaded the new build instead of a cached one (see serve.py NO_CACHE_EXT).
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.9.0";
 // Identify our traffic to the API owner: every request carries this so they can
 // see/measure our usage and reach out if needed.
 const CLIENT_TAG = `EQ-Auction-Forge/${APP_VERSION}`;
@@ -95,6 +95,8 @@ const state = {
                      // — resolves item click/proc/worn/focus/scroll ids to real names.
   focus: null,       // focus-families.json: { families:[{name,ranked,ranks,items}], spells:{id:[famIdx,rank]} }
   toons: [],         // loaded characters: [{name, filename, items:[parseInventory rows]}]
+  serverFilter: "",  // only aggregate dumps from this server ("" = all). Prices are
+                     // per-server, so two TLPs merged into one list price each other's gear.
   inventory: [],     // left pane: AGGREGATE across all toons [{name, location, count, id, bagCount, bagLocation, sources}]
   auction: [],       // right pane (curated "to post"): [{name, location, count, id, price, _priceInput}]
   invSel: new Set(), // selected inventory row indices
@@ -625,6 +627,17 @@ function charNameFromFilename(fname) {
   return m ? m[1] : (base || "toon");
 }
 
+// EQ writes CORPSE dumps too: "Vexrin's corpse0_frostreaver-Inventory.txt". Neither
+// regex above matches (apostrophe, space), so the whole filename became the "toon"
+// name and 43 corpse items counted as owned gear (reported 2026-08-10). A character name
+// is one word with no punctuation — that is the whole test.
+function isCharacterDumpName(fname) {
+  const base = (fname || "").replace(/\.[^.]+$/, "").replace(/-Inventory$/i, "");
+  const [name, server] = base.split("_");
+  if (!name || !/^[A-Za-z0-9]+$/.test(name)) return false;
+  return server === undefined || /^[A-Za-z0-9]+$/.test(server);
+}
+
 // "Rakthor_frostreaver-Inventory.txt" -> "frostreaver". "" when the filename
 // doesn't carry one (hand-renamed dumps).
 function serverFromFilename(fname) {
@@ -670,7 +683,12 @@ function rebuildInventory() {
   const order = [];
   const sharedSeen = new Set();   // location|id|name already counted from a shared bank
   let sharedDupes = 0;
+  // SERVER FILTER. Dumps from two servers merge into one priced list otherwise, and
+  // TLP-Auctions prices are per-server — a Teek toon's gear valued at Frostreaver
+  // prices is fiction. "" = every server (the normal single-server case).
   for (const toon of state.toons) {
+    if (state.serverFilter && serverFromFilename(toon.filename || "") !== state.serverFilter)
+      continue;
     for (const it of toon.items) {
       const key = it.id ? `#${it.id}` : it.name.toLowerCase();
       const isShared = /^sharedbank/i.test(it.location || "");
@@ -1855,7 +1873,7 @@ async function pickLogFile() {
 }
 
 // On load, re-attach the saved handle (permission is re-checked on Start, which is
-// the user gesture the browser requires to re-grant file access).
+// The user gesture the browser requires to re-grant file access).
 async function restoreLogHandle() {
   if (!window.showOpenFilePicker) return;
   try {
@@ -5323,12 +5341,31 @@ function renderToonChips() {
   if (!wrap) return;
   wrap.innerHTML = "";
   if (!state.toons.length) return;
+  const servers = [...new Set(state.toons.map((t) => serverFromFilename(t.filename || ""))
+    .filter(Boolean))].sort();
+  // Shown whenever a server is detectable, not only when two are — the user asked for the
+  // control and "it appears once you have a problem" means you cannot find it.
+  if (servers.length || state.serverFilter) {
+    const sel = document.createElement("select");
+    sel.className = "tc-server";
+    sel.title = "Only aggregate dumps from this server. Prices are per-server, so mixing two TLPs into one list values gear at the wrong market.";
+    sel.innerHTML = `<option value="">all servers (${servers.length})</option>` +
+      servers.map((sv) => `<option value="${escapeHtml(sv)}"${sv === state.serverFilter ? " selected" : ""}>${escapeHtml(sv)}</option>`).join("");
+    sel.addEventListener("change", () => {
+      state.serverFilter = sel.value;
+      refreshInventoryFromToons(sel.value ? `Showing ${sel.value} only.` : "Showing every server.");
+    });
+    wrap.appendChild(sel);
+  }
   for (const t of state.toons) {
     const items = t.items.length;
+    const sv = serverFromFilename(t.filename || "");
+    const off = state.serverFilter && sv !== state.serverFilter;
     const chip = document.createElement("span");
-    chip.className = "toon-chip";
+    chip.className = "toon-chip" + (off ? " toon-chip-off" : "");
     chip.innerHTML = `${escapeHtml(t.name)} <span class="tc-n">${items}</span>`;
-    chip.title = `${t.filename} — ${items} stacks`;
+    chip.title = `${t.filename} — ${items} stacks` + (sv ? ` — ${sv}` : "") +
+      (off ? " (filtered out: different server)" : "");
     const x = document.createElement("button");
     x.type = "button"; x.className = "tc-x"; x.textContent = "×";
     x.title = `Remove ${t.name}`;
@@ -5376,8 +5413,9 @@ function clearToons() {
 async function loadInventoryFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
-  let loaded = 0, failed = 0;
+  let loaded = 0, failed = 0, skipped = [];
   for (const file of files) {
+    if (!isCharacterDumpName(file.name)) { skipped.push(file.name); continue; }
     try {
       const text = await file.text();
       const items = parseInventory(text);
@@ -5393,6 +5431,8 @@ async function loadInventoryFiles(fileList) {
     }
   }
   const dupes = refreshInventoryFromToons();   // aggregate FIRST so counts are fresh
+  if (skipped.length)
+    log(`Skipped ${skipped.length} non-character dump(s) — corpse files are not inventory: ${skipped.join(", ")}`);
   log(`Loaded ${loaded} toon dump${loaded !== 1 ? "s" : ""}` +
     (failed ? `, ${failed} failed` : "") +
     ` → ${state.inventory.length} unique items across ${state.toons.length} toon(s)` +
@@ -5416,6 +5456,10 @@ async function reloadDumpsFromEqFolder() {
     return;
   }
   let loaded = 0, failed = 0, newest = 0;
+  const corpses = list.filter((d) => !isCharacterDumpName(d.file));
+  list = list.filter((d) => isCharacterDumpName(d.file));
+  if (corpses.length)
+    log(`Ignored ${corpses.length} corpse dump(s): ${corpses.map((d) => d.file).join(", ")}`);
   for (const d of list) {
     try {
       const text = await (await fetch(`/dump/${encodeURIComponent(d.file)}`)).text();

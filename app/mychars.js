@@ -42,7 +42,15 @@ async function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || (method + " " + path + " failed (" + r.status + ")"));
+  if (!r.ok) {
+    // Carry the body on the Error. Some failures are a REQUEST FOR INPUT rather than
+    // a fault — /gearsets/apply answers 409 with the mapping it needs you to confirm —
+    // and a bare message string throws that payload away.
+    const err = new Error(data.error || (method + " " + path + " failed (" + r.status + ")"));
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -197,6 +205,7 @@ function renderAll() {
   renderCharFilters();
   renderChars();
   renderBuilder();
+  renderCompPicker();
   renderKeys();
   renderRecs();
 }
@@ -373,9 +382,37 @@ $("lsBuilderBtn").addEventListener("click", () => {
   gotoTab("builder");
   renderSlots(); renderPicker(); refreshWarnings();
 });
+// Push = write the login set into MQ AutoLogin as a real profile group, so it
+// shows up in the sidebar and can be right-click -> Launch All. Two refusals are
+// expected and are NOT errors to swallow: the MQ loader being up (it caches the
+// profile list, so a write behind it is invisible), and the group already
+// existing (replacing it wipes whatever membership is in there now).
+// Typing your own group name pins it — loading another comp stops overwriting it.
+$("lsGroupName").addEventListener("input", () => { $("lsGroupName").dataset.fromComp = ""; });
+
 $("lsPushBtn").addEventListener("click", () => guard(async () => {
-  const res = await api("POST", "/loginset/push", { slots: loginSlots() });
-  toast("Pushed " + res.members.join(", ") + " → " + res.path);
+  const push = async (replace) => {
+    const r = await fetch("/roster/loginset/push", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slots: loginSlots(), group_name: $("lsGroupName").value.trim() || null,
+                             replace: !!replace }),
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  };
+  let { status, body } = await push(false);
+  if (status === 409 && body.exists) {
+    const have = (body.current || []).map((c) => c.name).join(", ") || "(empty)";
+    if (!confirm("AutoLogin already has a profile group '" + body.group + "':\n\n  " + have +
+                 "\n\nReplace its members with your current login set?")) return;
+    ({ status, body } = await push(true));
+  }
+  if (!body.ok) throw new Error(body.error || ("Push failed (" + status + ")"));
+  toast("AutoLogin group '" + body.group + "': " + body.added.join(", ") +
+        (body.missing && body.missing.length
+          ? " · SKIPPED (AutoLogin has never seen them at char select): " +
+            body.missing.map((m) => m.name).join(", ")
+          : "") +
+        " — open MQ and right-click the tray icon → Profiles → " + body.group);
 }));
 $("lsLaunchBtn").addEventListener("click", () => {
   const list = $("launchList");
@@ -849,6 +886,14 @@ function loadComp(id) {
     $("compName").value = c.name; $("compNotes").value = c.notes; $("compReq").value = c.required_unlocks;
   }
   $("autoResult").innerHTML = "";
+  // Name the AutoLogin launch group after the comp, not "eqf login set". Once every
+  // comp has its own gear sets, the group name is the only thing telling you which
+  // six the tray icon is about to launch. AutoLogin stores names lowercase.
+  const gn = $("lsGroupName");
+  if (gn && (!gn.value.trim() || gn.dataset.fromComp === "1")) {
+    gn.value = c ? c.name.toLowerCase() : "";
+    gn.dataset.fromComp = c ? "1" : "";
+  }
   selectedSlot = comp.slots.indexOf(null) === -1 ? 0 : comp.slots.indexOf(null);
   renderSlots(); renderPicker(); refreshWarnings();
 }
@@ -1086,6 +1131,12 @@ function refreshWarnings() {
       : "<div class='warn ok'>Clean — all roles covered, no conflicts.</div>";
     renderGearCheck(await api("POST", "/gearsets/compcheck",
       { slots: comp.slots.slice(0, 6).filter(Boolean) }));
+    // Show which set this comp fields per member BEFORE Apply is pressed, so the
+    // pickers are visible rather than only appearing after a rejected apply.
+    if (comp.id)
+      renderCompApply((await api("GET", "/gearsets/compmap/" + comp.id)).mapping, "");
+    else
+      renderCompApply(null, "");
   }), 150);
 }
 
@@ -1127,6 +1178,81 @@ $("compSaveBtn").addEventListener("click", () => guard(async () => {
   await reload();
   $("compSelect").value = comp.id;
 }));
+// ---------- apply a comp's gear sets ----------
+// `active` drives contention, routing and comp_gear_check, so it is only coherent
+// when the active group is ONE comp. The user ran two comps' sets active at once and
+// single-copy pieces read as permanently contested (2026-08-09). This is a flag
+// flip only — deactivating clears no picks and is undone by applying the other comp.
+let compMap = null;
+
+function renderCompApply(mapping, note) {
+  compMap = mapping;
+  const panel = $("compApplyPanel");
+  if (!mapping || !mapping.length) { panel.innerHTML = ""; return; }
+  const live = mapping.filter((m) => !m.bench);
+  const rows = live.map((m) => {
+    if (!m.candidates.length)
+      return "<div class='warn warn'>🎯 <b>" + esc(m.character) + "</b> — no " +
+        esc(m.class_name || "") + " loadout exists. Snapshot one from their slot card.</div>";
+    if (m.candidates.length === 1)
+      return "<div class='ca-row'><span class='ca-name'>" + esc(m.character) +
+        "</span><span class='hint'>" + esc(m.candidates[0].name) +
+        (m.candidates[0].used_by && m.candidates[0].used_by.length
+           ? " · also in " + esc(m.candidates[0].used_by.join(", ")) : "") +
+        (m.candidates[0].moves ? " · moves off " + esc(m.candidates[0].assigned_to) : "") +
+        "</span></div>";
+    // A loadout is a ROLE, so every set of this toon's class is offered — Rogue Main
+    // has to be reachable from Gavriel even while it is pinned to Zyrak. Say out loud
+    // when a pick takes the set off someone else, because that is not obvious.
+    const opts = m.candidates.map((c) =>
+      "<option value='" + c.id + "'" + (c.id === m.gear_set_id ? " selected" : "") + ">" +
+      esc(c.name) + " (" + c.pieces + " pieces)" +
+      (c.used_here ? " · ALREADY ON " + esc(c.used_here) + " IN THIS COMP" : "") +
+      (c.used_by && c.used_by.length ? " · also in " + esc(c.used_by.join(", ")) : "") +
+      (c.moves ? " · now on " + esc(c.assigned_to) : "") +
+      "</option>").join("");
+    return "<div class='ca-row" + (m.stored ? "" : " ca-row-ask") + "'>" +
+      "<span class='ca-name'>" + esc(m.character) + "</span>" +
+      "<select class='ca-pick' data-cid='" + m.character_id + "'>" + opts + "</select>" +
+      (m.stored ? "" : "<span class='hint'>" + m.candidates.length + " " +
+        esc(m.class_name || "") + " loadout(s) — pick the one this comp fields</span>") +
+      "</div>";
+  });
+  panel.innerHTML = (note ? "<div class='warn warn'>🎯 " + esc(note) + "</div>" : "") +
+    "<div class='ca-box'>" + rows.join("") + "</div>";
+}
+
+$("compApplyBtn").addEventListener("click", () => guard(async () => {
+  if (!comp.id) { toast("Save this composition first.", true); return; }
+  const choices = {};
+  for (const el of document.querySelectorAll("#compApplyPanel .ca-pick"))
+    choices[el.dataset.cid] = parseInt(el.value, 10);
+  let res;
+  try {
+    res = await api("POST", "/gearsets/apply", { comp_id: comp.id, choices });
+  } catch (e) {
+    // 409 = a member owns several sets and none is confirmed yet. Show the pickers
+    // and stop; nothing was activated. Deliberately NOT auto-resolved: "already
+    // active" is not intent, it is how Zyrak ended up fielding Rogue Main.
+    if (e.data && e.data.needs_choice) {
+      renderCompApply(e.data.mapping, e.data.error);
+      toast(e.data.error, true);
+      return;
+    }
+    throw e;
+  }
+  renderCompApply(res.mapping, "");
+  let msg = "Applied '" + res.comp + "' — " + res.active + " set(s) active.";
+  if (res.retargeted && res.retargeted.length)
+    msg += " Moved: " + res.retargeted.map((t) =>
+      t.set + " → " + t.to + (t.from ? " (was " + t.from + ")" : "")).join(", ") + ".";
+  if (res.deactivated.length) msg += " Deactivated: " + res.deactivated.join(", ") + ".";
+  if (res.no_set.length) msg += " No set for: " + res.no_set.join(", ") + ".";
+  toast(msg);
+  await reload();
+  refreshWarnings();
+}));
+
 $("compDeleteBtn").addEventListener("click", () => guard(async () => {
   if (!comp.id) { loadComp(null); return; }
   const name = $("compName").value || "this composition";
@@ -1438,6 +1564,11 @@ $("bestGoBtn").addEventListener("click", () => guard(async () => {
 let gsLoaded = false;
 let gsSets = [];
 let gsFocusId = null;                 // set row to highlight after a comp-builder jump
+// Comp focus: while set, the sets table, the Move Plan and the MQ export are all
+// scoped to these six. The PLANNER still routes every active set on the roster —
+// only the report is narrowed — or a comp would read clean while taking a piece
+// another set is already promised.
+let gsComp = null;                    // { name, ids: [char_id], showAll: bool }
 
 // The best set describing a toon: active first, then most recently touched.
 function bestSetFor(cid) {
@@ -1456,10 +1587,13 @@ function slotGearHtml(c) {
       " — click to snapshot what they are wearing now and open Gear Sets'>🎁 no set — 📸 snapshot</div>";
   }
   const fit = set.fit || {};
+  // Count worn against worn_total, not total: virtual slots (the Avatar weapon) live in
+  // the bags on purpose, so a complete set would otherwise never read as full.
+  const wTot = fit.worn_total != null ? fit.worn_total : fit.total;
   const fitTxt = fit.total == null ? set.items.length + " pc"
     : fit.worn == null ? fit.total + " pc · no dump"
-    : fit.worn + "/" + fit.total + " worn";
-  const full = fit.total != null && fit.worn === fit.total;
+    : fit.worn + "/" + wTot + " worn";
+  const full = fit.total != null && fit.worn === wTot;
   return "<div class='slot-gear" + (set.active ? "" : " retired") + (full ? " full" : "") +
     "' data-cid='" + c.id + "' title='Gear set: " + esc(set.name) +
     (set.active ? "" : " (retired)") + " — click to view in Gear Sets'>🎁 " +
@@ -1484,6 +1618,216 @@ async function gearJump(cid) {
   if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
+// ---------- comp gear check (the whole six, not one set at a time) ----------
+// "Can I field this comp right now?" Built from the same routed plan the Move Plan
+// renders, so the roll-up and the detail can never disagree.
+
+const GS_STATE = {
+  ready:   { txt: "✔ ready",     cls: "gs-ok",     tip: "Every piece of their set is on their body" },
+  onhand:  { txt: "🎒 to equip",  cls: "gs-free",   tip: "They already hold everything missing — log in and put it on" },
+  moves:   { txt: "🚚 inbound",   cls: "gs-swap",   tip: "Pieces still have to be moved to them — see the Move Plan below" },
+  blocked: { txt: "⛔ blocked",   cls: "gs-bad",    tip: "At least one piece can't be delivered at all" },
+  noset:   { txt: "no set",      cls: "gs-warn",   tip: "No active gear set assigned — nothing to check against" },
+  retired: { txt: "set retired", cls: "gs-warn",   tip: "They have a set, it just isn't active — a retired set claims no items and isn't planned" },
+};
+
+const compLiveIds = (slots) => (slots || []).slice(0, 6).filter(Boolean);
+
+function renderCompPicker() {
+  const sel = $("gsCompPick");
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = "<option value=''>— pick a saved comp —</option>" +
+    S.compositions.map((c) => "<option value='" + c.id + "'>" + esc(c.name) +
+      " (" + compLiveIds(c.slots).length + ")</option>").join("");
+  if (cur) sel.value = cur;
+}
+
+// Focus the Gear Sets tab on one comp and re-run everything scoped to it.
+async function runCompGear(ids, name, compId) {
+  ids = ids.filter(Boolean);
+  if (!ids.length) throw new Error("That comp has no live members yet.");
+  $("gsCompOut").innerHTML = "<div class='hint'>Routing every active set, then reporting on " +
+    esc(name) + "…</div>";
+  gsComp = { name: name, ids: ids, id: compId || null,
+             showAll: gsComp ? gsComp.showAll : false };
+  if (!gsLoaded) { gsLoaded = true; await loadGearSets(); }
+  // WHICH SETS this comp fields — not "sets pinned to a member". Pinning answers the
+  // wrong question in both directions: Trixrez is a member so his PL set showed up in
+  // a raid comp, and Rogue Main is pinned to Zyrak so it was hidden from Gavriel, the
+  // very toon who needs it. Loadouts are roles; the comp's mapping is the authority.
+  gsComp.setIds = null;
+  gsComp.unmapped = [];
+  if (compId) {
+    try {
+      const mp = (await api("GET", "/gearsets/compmap/" + compId)).mapping || [];
+      const live = mp.filter((m) => !m.bench);
+      gsComp.setIds = live.map((m) => m.gear_set_id).filter(Boolean);
+      gsComp.unmapped = live.filter((m) => !m.gear_set_id || m.needs_choice)
+        .map((m) => m.character);
+    } catch (e) { /* unsaved comp: fall back to the pin-based scope below */ }
+  }
+  const d = await api("POST", "/gearsets/compplan",
+    { slots: ids, login: loginSlots(), stale_h: Number($("gsStale").value) });
+  gsComp.data = d;
+  renderCompReadiness(d);
+  applyCompScope();
+  renderGearSets();
+  renderPlanResult(d.plan);
+}
+
+function clearCompFocus() {
+  gsComp = null;
+  $("gsCompOut").innerHTML = "<div class='hint'>Focus cleared — the sets table and Move Plan are back to the whole roster.</div>";
+  applyCompScope();
+  renderGearSets();
+  $("gsPlan").innerHTML = "<div class='hint'>Hit Plan transfers for the whole-roster plan.</div>";
+}
+
+// Everything that changes when a comp is (or isn't) in focus.
+function applyCompScope() {
+  $("gsCompClearBtn").hidden = !gsComp;
+  $("gsPlanScope").innerHTML = gsComp
+    ? "scoped to <b>" + esc(gsComp.name) + "</b> — every active set is still routed (nothing gets double-promised), you just see this six's moves"
+    : "every ACTIVE set, routed by real cost — your shared bank beats a swap beats a parcel · uses the Current Login Set for trade-now routing";
+}
+
+function renderCompReadiness(d) {
+  const sum = d.summary || {}, st = sum.states || {};
+  const chip = (n, cls, txt, tip) => n
+    ? "<span class='gs-chip " + cls + "'" + (tip ? " title='" + esc(tip) + "'" : "") + ">" + n + " " + txt + "</span>" : "";
+  const chips = "<div class='gs-sum'>" +
+    "<span class='gs-chip'>" + esc(gsComp.name) + " · " + (sum.members || 0) + " live</span>" +
+    chip(st.ready, "gs-ok", "ready") +
+    chip(st.onhand, "gs-free", "to equip", "They hold the pieces already — just log in and wear them") +
+    chip(st.moves, "gs-swap", "waiting on moves") +
+    chip(st.blocked, "gs-bad", "blocked") +
+    chip((d.members || []).filter((m) => m.reason === "retired").length, "gs-warn",
+         "set retired", "They have a set — it's switched off, so it claims nothing and isn't planned") +
+    chip((d.members || []).filter((m) => m.reason === "none").length, "gs-warn", "no set") +
+    "<span class='gs-chip'>" + (sum.logins || 0) + " login(s) to gear it</span>" +
+    (sum.ready ? "<span class='gs-chip gs-ok'>✔ everyone is wearing their set</span>" : "") +
+    "</div>";
+
+  const rows = (d.members || []).map((m) => {
+    // A member with a RETIRED set isn't the same problem as one with no set —
+    // the fix is a tick box, not a snapshot (which would just build a duplicate).
+    const b = GS_STATE[m.reason === "retired" ? "retired" : m.state] || GS_STATE.noset;
+    const inc = Object.keys(m.incoming || {})
+      .map((k) => (m.incoming[k]) + " " + (GS_BADGE[k] ? GS_BADGE[k].txt.replace(/^\S+\s/, "") : k))
+      .join(" · ");
+    const gaps = (m.gaps || []).length
+      ? "<span class='gs-route gs-warn' title='The set has no pick for: " + esc(m.gaps.join(", ")) +
+        " — open the editor and fill them, or leave them if that's deliberate'>" +
+        m.gaps.length + " slot(s) unset</span>" : "";
+    const blocked = (m.blocked || []).map((x) =>
+      "<div class='hint'>" + gsBadge(x.status, x.note) + " " + esc(x.item) +
+      " <span class='hint'>(" + esc(x.slot) + ")</span></div>").join("");
+    const dump = m.dumped
+      ? (m.dump_age_h != null && m.dump_age_h > 72
+          ? "<span class='st-warn' title='Everything here is judged against a dump this old'>⏳ " +
+            Math.floor(m.dump_age_h / 24) + "d</span>" : "")
+      : "<span class='st-warn' title='No inventory dump — we cannot see what they are wearing'>no dump</span>";
+    // "use for this comp" records the choice on the comp slot; it does NOT flip the
+    // set on by itself. A lone activate is what let two comps' sets be live at once.
+    const shelved = (m.shelved_sets || []).filter((s) => s.pieces).map((s) =>
+      "<div><button class='btn btn-ghost btn-sm gsc-act' data-sid='" + s.id +
+      "' data-cid='" + m.char_id + "'" +
+      (gsComp && gsComp.id ? "" : " disabled title='Save the comp first'") +
+      " title='Field this loadout for " + esc(m.name) + " in this comp. Press " +
+      "&quot;Apply this comp&#39;s gear sets&quot; to switch the whole six over.'>" +
+      "🎯 use for this comp</button> " +
+      esc(s.name) + " <span class='hint'>" + s.pieces + " pc</span></div>").join("");
+    const setCell = m.set_id
+      ? "<b>" + esc(m.set_name) + "</b> <span class='hint'>" + m.pieces + " pc</span> " + gaps
+      : (shelved || "") +
+        "<button class='btn btn-ghost btn-sm gsc-snap' data-cid='" + m.char_id +
+        "' title='Snapshot what they are wearing right now as their set'>📸 snapshot worn</button>";
+    return "<tr class='gsc-" + esc(m.state) + "'>" +
+      "<td><b>" + esc(m.name) + "</b> " + clsSpan(m.class_name, (m.class_name || "?").slice(0, 3)) +
+      "<div class='hint'>" + esc(m.account_alias || "no account") + " " + dump + "</div></td>" +
+      "<td><span class='gs-route " + b.cls + "' title='" + esc(b.tip) + "'>" + b.txt + "</span></td>" +
+      "<td>" + setCell + "</td>" +
+      "<td>" + (m.set_id ? m.equipped + "/" + m.pieces + " worn" +
+        (m.on_hand ? " · <span class='gs-route gs-free'>" + m.on_hand + " on hand</span>" : "") : "—") + "</td>" +
+      "<td>" + (inc || "—") + (m.stale_moves
+        ? " <span class='st-warn' title='Routed from a dump older than the trust window'>⏳" + m.stale_moves + "</span>" : "") + "</td>" +
+      "<td>" + (blocked || "<span class='hint'>—</span>") + "</td>" +
+      "<td>" + (m.set_id
+        ? "<button class='btn btn-ghost btn-sm gsc-edit' data-sid='" + m.set_id + "'>✎ edit set</button>" : "") + "</td></tr>";
+  }).join("");
+
+  // Copy shortages: the same fungible-copy math the builder warns with. Repeated
+  // here because "everyone has a set" and "there are enough copies to fill them
+  // all at once" are different questions.
+  const c = d.check || {};
+  const warns = []
+    .concat((c.overlaps || []).map((o) =>
+      "<div class='warn error'>🎁 <b>" + esc(o.item) + "</b> — " + o.need +
+      " set(s) in this comp need it (" + esc(o.sets.join(", ")) + ") but you own " + o.owned +
+      (o.owned === 0 ? " (nobody has one)" : "") + ". Someone will go without.</div>"))
+    .concat((c.outside || []).map((o) =>
+      "<div class='warn warn'>🎁 Tight: <b>" + esc(o.item) + "</b> — this comp needs " +
+      o.comp_need + " and <i>" + esc(o.outside_sets.join(", ")) + "</i> (outside this comp) want(s) " +
+      o.outside_need + " more, but you own " + o.owned + ". Fine to play — just don't gear both at once.</div>"));
+
+  $("gsCompOut").innerHTML = chips + warns.join("") +
+    "<div class='tablewrap'><table class='mc-table gsc-table'><thead><tr>" +
+    "<th>Toon</th><th>State</th><th>Set</th><th>On them</th>" +
+    "<th title='Pieces still to be moved to them, by route'>Inbound</th>" +
+    "<th title='Pieces nobody can deliver — every copy is claimed, No Trade, LORE, or missing'>Blocked</th>" +
+    "<th></th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    "<div class='hint'>Routes and detail are in the Move Plan below — already scoped to this comp.</div>";
+
+  $("gsCompOut").querySelectorAll(".gsc-snap").forEach((btn) => {
+    btn.addEventListener("click", () => guard(async () => {
+      const cid = parseInt(btn.dataset.cid, 10);
+      const res = await api("POST", "/gearsets/snapshot", { char_id: cid });
+      toast("Snapshotted '" + res.name + "' — " + res.pieces + " worn piece(s).");
+      await loadGearSets();
+      await runCompGear(gsComp.ids, gsComp.name, gsComp.id);
+    }));
+  });
+  $("gsCompOut").querySelectorAll(".gsc-act").forEach((btn) => {
+    btn.addEventListener("click", () => guard(async () => {
+      if (!gsComp || !gsComp.id) throw new Error("Save this composition first.");
+      await api("POST", "/gearsets/compchoice", {
+        comp_id: gsComp.id, character_id: parseInt(btn.dataset.cid, 10),
+        gear_set_id: parseInt(btn.dataset.sid, 10) });
+      toast("Set recorded for this comp — press 🎯 Apply this comp's gear sets to switch over.");
+      await loadGearSets();
+      await runCompGear(gsComp.ids, gsComp.name, gsComp.id);
+    }));
+  });
+  $("gsCompOut").querySelectorAll(".gsc-edit").forEach((btn) => {
+    btn.addEventListener("click", () => guard(() => {
+      const s = gsSets.find((x) => x.id === parseInt(btn.dataset.sid, 10));
+      if (s) openSetEditor(s);
+    }));
+  });
+}
+
+$("gsCompRunBtn").addEventListener("click", () => guard(async () => {
+  const id = parseInt($("gsCompPick").value, 10);
+  if (!id) throw new Error("Pick a saved comp first — or use 🎁 Check this comp's gear in the Comp Builder.");
+  const c = S.compositions.find((x) => x.id === id);
+  await runCompGear(compLiveIds(c.slots), c.name, c.id);
+}));
+$("gsCompClearBtn").addEventListener("click", () => guard(clearCompFocus));
+$("gsCompPick").addEventListener("change", () => {
+  if ($("gsCompPick").value) guard(() => $("gsCompRunBtn").click());
+});
+
+// Comp Builder -> here, carrying the six currently on screen (saved or not).
+$("compGearBtn").addEventListener("click", () => guard(async () => {
+  const ids = compLiveIds(comp.slots);
+  if (!ids.length) throw new Error("Fill some slots first.");
+  gotoTab("sets");
+  $("gsCompPick").value = comp.id || "";
+  await runCompGear(ids, $("compName").value.trim() || "this comp", comp.id);
+  $("gsCompCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}));
+
 const GS_BADGE = {
   worn:    { txt: "✓ worn",        cls: "gs-ok",    tip: "Already equipped on the target" },
   have:    { txt: "🎒 equip",      cls: "gs-ok",    tip: "Already on the target — just equip it" },
@@ -1494,6 +1838,11 @@ const GS_BADGE = {
   reserved:{ txt: "⚑ reserved",    cls: "gs-warn",  tip: "Every copy is promised to another active set" },
   notrade: { txt: "⛔ no trade",   cls: "gs-bad",   tip: "FV NO DROP — cannot be moved on Frostreaver" },
   lore:    { txt: "LORE",          cls: "gs-bad",   tip: "LORE item — a character can only carry one" },
+  covered: { txt: "✓ covered",     cls: "gs-ok",    tip: "Another slot in this set already carries a weapon with this proc — the slot is redundant and can be cleared" },
+  // shortfall is NOT missing: you own the item, this set just asked for more copies
+  // of it than exist — usually the same piece picked into two slots it legitimately
+  // qualifies for (a 2H that also procs Avatar, say). Different fix, different badge.
+  shortfall:{ txt: "✗ short",      cls: "gs-bad",   tip: "You own it, but this set claims it in more slots than you have copies" },
   missing: { txt: "✗ missing",     cls: "gs-bad",   tip: "Nobody on the roster has one" },
 };
 const gsBadge = (st, note) => {
@@ -1533,19 +1882,57 @@ function renderGearSets() {
   tbody.innerHTML = "";
   if (!gsSets.length) {
     tbody.innerHTML = "<tr><td colspan='8' class='hint'>No gear sets yet — snapshot a toon's worn gear above, or import your old Macro Builder sets.</td></tr>";
+    $("gsStatus").innerHTML = "";
     return;
   }
-  for (const s of gsSets) {
+  // With a comp in focus the table shows only that six's sets — the other sets
+  // still exist and are still routed, they're just not what you're looking at.
+  // Prefer the comp's own mapping (the loadouts it fields). Only fall back to the
+  // old "pinned to a member" rule for a comp that was never saved, which has no
+  // mapping to read.
+  // In focus the table shows the loadouts this comp actually fields — its mapping,
+  // which is the only record of "belongs to this comp". Nothing is hidden by a label;
+  // "show every set" is one click away.
+  const byMap = gsComp && !gsComp.showAll && gsComp.setIds;
+  const mapped = new Set(byMap ? gsComp.setIds : []);
+  const focus = gsComp && !gsComp.showAll
+    ? new Set(byMap ? gsComp.setIds : gsComp.ids) : null;
+  const shown = !focus ? gsSets
+    : byMap ? gsSets.filter((s) => mapped.has(s.id))
+            : gsSets.filter((s) => focus.has(s.assigned_char_id || s.source_char_id));
+  const unmapped = (gsComp && gsComp.unmapped) || [];
+  $("gsStatus").innerHTML = focus
+    ? "Showing <b>" + shown.length + "</b> of " + gsSets.length + " sets — the loadouts <b>" +
+      esc(gsComp.name) + "</b> fields." +
+      (unmapped.length ? " <span class='gs-warn'>No loadout chosen yet for " +
+        esc(unmapped.join(", ")) + " — pick one in the Comp Builder, or make a set and "
+        + "assign it there.</span>" : "") +
+      " <a href='#' id='gsShowAll'>show every set</a>"
+    : (gsComp ? "Showing every set. <a href='#' id='gsShowFocus'>back to " +
+        esc(gsComp.name) + " only</a>" : "");
+  const toggle = $("gsShowAll") || $("gsShowFocus");
+  if (toggle) toggle.addEventListener("click", (e) => {
+    e.preventDefault();
+    gsComp.showAll = !gsComp.showAll;
+    renderGearSets();
+  });
+  if (!shown.length) {
+    tbody.innerHTML = "<tr><td colspan='8' class='hint'>Nobody in this comp has a gear set yet — snapshot them from the panel above.</td></tr>";
+    return;
+  }
+  for (const s of shown) {
     const fit = s.fit || {};
     const fitCell = fit.total == null ? "—"
       : fit.worn == null
         ? "<span class='st-dim' title='The assigned toon has no inventory dump yet'>no dump</span>"
-        : "<b class='" + (fit.worn === fit.total ? "st-ready" : "") + "'>" + fit.worn + "</b> worn · " +
+        : "<b class='" + (fit.worn === (fit.worn_total != null ? fit.worn_total : fit.total)
+            ? "st-ready" : "") + "'>" + fit.worn + "</b> worn · " +
           fit.present + "/" + fit.total + " on hand";
     const tr = document.createElement("tr");
     tr.className = (!s.active ? "gs-retired" : "") + (s.id === gsFocusId ? " gs-focus" : "");
     tr.innerHTML =
-      "<td><b>" + esc(s.name) + "</b>" + (s.notes ? "<div class='hint'>" + esc(s.notes) + "</div>" : "") + "</td>" +
+      "<td><b>" + esc(s.name) + "</b>" +
+        (s.notes ? "<div class='hint'>" + esc(s.notes) + "</div>" : "") + "</td>" +
       "<td>" + clsSpan(s.class_name, s.class_name || "—") + "</td>" +
       "<td class='hint'>" + esc(s.source_name || "—") + "</td>" +
       "<td><select class='gs-assign'>" + gsCharOptions(s) + "</select></td>" +
@@ -1554,6 +1941,8 @@ function renderGearSets() {
       "<td><input type='checkbox' class='gs-active' " + (s.active ? "checked" : "") +
       " title='Retired sets keep their contents but release every item claim'></td>" +
       "<td><button class='btn btn-ghost btn-sm gs-ren' type='button' title='Edit — rename, reassign, or hand-pick every slot from everything you own'>✎ edit</button>" +
+      // Duplicate is for a VARIANT, not for sharing — sharing is what the tag does.
+      "<button class='btn btn-ghost btn-sm gs-clone' type='button' title='Duplicate this loadout as a separate set — for a variant that will diverge. To field the SAME loadout in another comp, give both comps the same gear family instead.'>⧉ duplicate</button>" +
       "<button class='raid-del gs-del' type='button' title='Delete set'>✕</button></td>";
     tr.querySelector(".gs-assign").addEventListener("change", (e) => guard(async () => {
       await api("PUT", "/gearsets/" + s.id, { assigned_char_id: parseInt(e.target.value, 10) });
@@ -1565,6 +1954,12 @@ function renderGearSets() {
       await loadGearSets();
     }));
     tr.querySelector(".gs-ren").addEventListener("click", () => guard(() => openSetEditor(s)));
+    tr.querySelector(".gs-clone").addEventListener("click", () => guard(async () => {
+      const res = await api("POST", "/gearsets/clone", { set_id: s.id });
+      toast("Duplicated as '" + res.name + "' — " + res.pieces +
+        " piece(s), retired. It is a separate set from now on.");
+      await loadGearSets();
+    }));
     tr.querySelector(".gs-del").addEventListener("click", () => guard(async () => {
       if (!confirm("Delete gear set '" + s.name + "'? (Items on your toons are untouched — this only deletes the list.)")) return;
       await api("DELETE", "/gearsets/" + s.id);
@@ -1758,8 +2153,17 @@ function gsPickCand(slot, pick) {
 // Live set totals. Haste is the MAX single worn item, never summed (same truth as
 // gear.py worn_stats) — summing it would badly overstate a set.
 function gsRenderTotals() {
-  const tot = {}; let haste = 0, unknown = 0;
+  const tot = {}; let haste = 0, unknown = 0, stowed = 0;
   for (const sm of gsEd.slots) {
+    // Virtual slots (Avatar / 2-Hander) are gear the toon CARRIES, never wears, so their
+    // stats must not land in any total — this bar, Comp Power, or the group roll-up.
+    // Counted and named instead of silently dropped, so the bar can't look wrong.
+    if (sm.extra) {
+      for (let k = 0; k < (sm.paired ? 2 : 1); k++) {
+        if (gsEd.picks[gsEdKey(sm.slot, k)]) stowed++;
+      }
+      continue;
+    }
     for (let k = 0; k < (sm.paired ? 2 : 1); k++) {
       const pick = gsEd.picks[gsEdKey(sm.slot, k)];
       if (!pick) continue;
@@ -1772,10 +2176,12 @@ function gsRenderTotals() {
   const cells = GS_STATS.filter(([k]) => tot[k])
     .map(([k, l]) => "<span class='gs-tot'><b>" + tot[k] + "</b> " + l + "</span>");
   if (haste) cells.push("<span class='gs-tot'><b>" + haste + "%</b> Haste</span>");
-  $("gsEdTotals").innerHTML = cells.length
-    ? cells.join("") + (unknown ? "<span class='hint'>· " + unknown +
-        " pick(s) outside the current filter not counted</span>" : "")
-    : "<span class='hint'>No pieces picked yet.</span>";
+  const notes = (unknown ? "<span class='hint'>· " + unknown +
+      " pick(s) outside the current filter not counted</span>" : "") +
+    (stowed ? "<span class='hint'>· " + stowed + " carried in bags (Avatar / 2-Hander /" +
+      " Mount / WW Clicky) — reserved, not counted in any stats</span>" : "");
+  $("gsEdTotals").innerHTML = cells.length ? cells.join("") + notes
+    : (stowed ? notes : "<span class='hint'>No pieces picked yet.</span>");
 }
 
 function gsEdCount() {
@@ -1877,6 +2283,31 @@ function renderSetEditor() {
       tbody.appendChild(tr);
     }
   }
+  // ORPHANED PICKS. This table draws one row per known slot, so a pick whose slot is
+  // blank or unrecognised was invisible here while STILL claiming its item — the user
+  // changed Sleeper Monk 2's Neck and the comp check kept reporting the old Yelinak's
+  // Talisman, because a second slotless row went on claiming it (2026-08-09, from the
+  // Macro Builder import). Never hide a claim: list it with a way to drop it.
+  const known = new Set();
+  for (const sm of gsEd.slots)
+    for (let k = 0; k < (sm.paired ? 2 : 1); k++) known.add(gsEdKey(sm.slot, k));
+  const orphans = Object.keys(gsEd.picks).filter((k) => !known.has(k));
+  for (const key of orphans) {
+    const p = gsEd.picks[key];
+    const tr = document.createElement("tr");
+    tr.className = "gs-slotrow gs-slotrow-steal";
+    tr.innerHTML = "<td class='gs-slotname'>no slot</td>" +
+      "<td class='gs-slotpick'><b>" + esc(p.item_name) + "</b>" +
+      "<div class='hint'>This pick has no slot, so it never showed in a row above — " +
+      "but it still claims the item. Drop it unless you know why it is here." +
+      " <a href='#' class='gs-orphan-del'>remove</a></div></td>";
+    tr.querySelector(".gs-orphan-del").addEventListener("click", (e) => {
+      e.preventDefault();
+      delete gsEd.picks[key];
+      renderSetEditor();
+    });
+    tbody.appendChild(tr);
+  }
   if (!gsEd.sel && firstKey) gsEd.sel = firstKey;
   gsEdCount();
   gsRenderTotals();
@@ -1903,7 +2334,8 @@ function renderCandidates() {
   const slot = key.slice(0, key.lastIndexOf("|"));
   const cur = gsEd.picks[key];
   const curC = gsPickCand(slot, cur);
-  $("gsCandTitle").textContent = slot + (gsEd.slots.find((s) => s.slot === slot && s.paired)
+  const slotMeta = gsEd.slots.find((s) => s.slot === slot) || {};
+  $("gsCandTitle").textContent = slot + (slotMeta.paired
     ? " " + (parseInt(key.slice(key.lastIndexOf("|") + 1), 10) + 1) : "");
 
   let list = (gsEd.cands[slot] || []).slice();
@@ -1927,9 +2359,10 @@ function renderCandidates() {
           "<span class='gs-cand-name'>" + (c.target_has ? "✔ " : "") + esc(c.name) + "</span>" +
           (c.score ? "<span class='gs-cand-score' title='class-weighted score'>⚡" + c.score + "</span>" : "") +
           (c.owned > 1 ? "<span class='hint'>" + Math.max(0, c.free) + " free of " + c.owned + "</span>" : "") +
-          (taken && !sel ? "<span class='gs-warn' title='Every copy is claimed by " +
-            esc(c.reserved_by.join(", ")) + " — picking this TAKES one'>⚑ takes from " +
-            esc(c.reserved_by.join(", ")) + "</span>" : "") +
+          (taken && !sel ? "<span class='gs-warn' title='Also picked by " +
+            esc(c.reserved_by.join(", ")) + ". Picking it here changes nothing over there — " +
+            "both sets keep it, and the move plan says which toon can actually get a copy.'>" +
+            "⚑ also in " + esc(c.reserved_by.join(", ")) + "</span>" : "") +
         "</div>" +
         "<div class='gs-statline'>" + esc(gsStatLine(c)) + "</div>" +
         (gsEffectsHtml(c) ? "<div class='gs-fxline'>" + gsEffectsHtml(c) + "</div>" : "") +
@@ -1937,8 +2370,25 @@ function renderCandidates() {
         "<div class='gs-cand-where'>" + gsEdWhere(c) + "</div>" +
       "</div>");
   }
-  box.innerHTML = rows.join("") ||
-    "<p class='hint gs-cand-empty'>Nothing you own fits this slot for this class.</p>";
+  // An account-bound list is short ON PURPOSE — it only ever shows copies held on
+  // the assigned toon's own account, because a mount or claim clicky can't cross
+  // accounts. Saying so up front stops a 1-item list reading as a missing-data bug.
+  const boundChar = $("gsEdAssign").value
+    ? charById(parseInt($("gsEdAssign").value, 10)) : null;
+  const boundAcct = boundChar && boundChar.account_id != null
+    ? acctLabel(acctById(boundChar.account_id)) : null;
+  const bound = slotMeta.account_bound
+    ? "<p class='hint gs-cand-empty'>Account-bound: " + (boundAcct
+        ? "only copies on <b>" + esc(boundAcct) + "</b> are listed"
+        : "<b>assign this set to a toon</b> to see its account's copies") +
+      " — a mount or claim clicky can never be traded or parcelled in from another account.</p>"
+    : "";
+  // rows always carries the "— empty —" option, so keep it even when nothing
+  // matched: clearing a pick has to stay possible.
+  box.innerHTML = bound + rows.join("") + (list.length ? ""
+    : "<p class='hint gs-cand-empty'>" + (slotMeta.account_bound
+        ? "Nothing on this account has one yet."
+        : "Nothing you own fits this slot for this class.") + "</p>");
   box.querySelectorAll(".gs-cand").forEach((el) => el.addEventListener("click", () => {
     const iid = parseInt(el.dataset.iid, 10);
     if (!iid) delete gsEd.picks[key];
@@ -1967,7 +2417,16 @@ $("gsEdClearBtn").addEventListener("click", () => {
 
 // ⭐ Fill every EMPTY armor/jewelry slot with the top-scored free candidate.
 // Weapons/range/ammo stay manual (scoring can't judge weapon ratios/procs well).
-const GS_AUTOFILL_SKIP = new Set(["Charm", "Primary", "Secondary", "Range", "Ammo", "Power"]);
+// Avatar joins the weapons for the same reason: the slot's candidate list is now
+// exactly the weapons that proc Avatar (server-side, proc 2434), but WHICH of them a
+// toon can actually swing is a weapon-skill call the stat score does not model — a
+// monk wants the Brawl Stick, a warrior the Warsword, and "best AC/HP" cannot tell
+// them apart.
+// Mount / WW Clicky skip for a different reason: they have no stats at all, so
+// "best" is meaningless for them — which mount or which port clicky is entirely
+// your call, and auto-picking one would just claim a copy at random.
+const GS_AUTOFILL_SKIP = new Set(["Charm", "Primary", "Secondary", "Range", "Ammo", "Power",
+                                  "Avatar", "2-Hander", "Mount", "WW Clicky"]);
 $("gsEdBestBtn").addEventListener("click", () => {
   if (!gsEd) return;
   const target = $("gsEdAssign").value ? charById(parseInt($("gsEdAssign").value, 10)) : null;
@@ -2004,23 +2463,18 @@ $("gsEdSaveBtn").addEventListener("click", () => guard(async () => {
   const name = $("gsEdName").value.trim();
   if (!name) throw new Error("Give the set a name.");
   const items = [];
-  const steals = [];
   for (const [key, p] of Object.entries(gsEd.picks)) {
     const [slot, k] = key.split("|");
     items.push({ item_id: p.item_id, item_name: p.item_name, slot, slot_index: parseInt(k, 10) });
-    const c = (gsEd.cands[slot] || []).find((x) => x.item_id === p.item_id);
-    if (c && c.free <= 0 && c.reserved_by.length)
-      steals.push(p.item_name + " (from " + c.reserved_by.join(", ") + ")");
   }
+  // No steal prompt. A set is what you want this toon to wear, so a piece may live
+  // in as many sets as you like and saving here never edits another set. Shortfalls
+  // show up in the move plan as "reserved", where they can be acted on.
   if (!items.length &&
       !confirm("Save '" + name + "' EMPTY? The set is kept but every slot clears and all its item claims are freed."))
     return;
-  if (steals.length &&
-      !confirm("These pieces are claimed by other sets and will be TAKEN from them:\n\n" +
-        steals.join("\n") + "\n\nContinue?"))
-    return;
   const payload = {
-    name, items, steal: steals.length > 0,
+    name, items,
     class_name: $("gsEdClass").value || "",
     assigned_char_id: $("gsEdAssign").value ? parseInt($("gsEdAssign").value, 10) : null,
   };
@@ -2028,8 +2482,10 @@ $("gsEdSaveBtn").addEventListener("click", () => guard(async () => {
   if (gsEd.setId) res = await api("PUT", "/gearsets/" + gsEd.setId, payload);
   else { res = await api("POST", "/gearsets", payload); gsEd.setId = res.id; }
   let msg = "Saved '" + name + "' — " + items.length + " piece(s).";
-  if (res.taken && res.taken.length)
-    msg += " Took " + res.taken.map((t) => t.item + " from " + t.from_set).join(", ") + ".";
+  if (res.contested && res.contested.length)
+    msg += " Shared with other sets: " + res.contested.map((c) =>
+      c.item + " (" + c.want + " sets want it, you own " + c.owned + ")").join("; ") +
+      ". Every set keeps its pick — see the move plan for who gets a copy.";
   toast(msg);
   gsFocusId = gsEd.setId;
   await loadGearSets();
@@ -2148,7 +2604,8 @@ function renderPlanResult(d) {
 $("gsPlanBtn").addEventListener("click", () => guard(async () => {
   $("gsPlan").innerHTML = "<div class='hint'>Routing every active set…</div>";
   const d = await api("POST", "/gearsets/plan",
-    { login: loginSlots(), stale_h: Number($("gsStale").value) });
+    { login: loginSlots(), stale_h: Number($("gsStale").value),
+      focus: gsComp ? gsComp.ids : null });
   renderPlanResult(d);
 }));
 // tightening the trust window re-plans, so the flags update without a second click
@@ -2157,7 +2614,11 @@ $("gsStale").addEventListener("change", () => {
 });
 
 $("gsExportBtn").addEventListener("click", () => guard(async () => {
-  const d = await api("POST", "/gearsets/export", { login: loginSlots() });
+  // Focused: only this comp's moves go to MQ — same scoping as the Move Plan on
+  // screen, so what you export is what you just read.
+  const d = await api("POST", "/gearsets/export",
+    { login: loginSlots(), stale_h: Number($("gsStale").value),
+      focus: gsComp ? gsComp.ids : null });
   // Reuse the proven serve.py writers (same files the old Gear Planner wrote).
   const r1 = await fetch("/gearplan", { method: "POST", headers: { "Content-Type": "text/plain" }, body: d.plan_lua });
   const j1 = await r1.json().catch(() => ({}));

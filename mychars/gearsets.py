@@ -35,7 +35,18 @@ BUCKET_RANK = {"bags": 0, "worn": 1, "bank": 2, "shared": 3, "keyring": 4,
                "depot": 5, "hoard": 6, "persona": 7}
 MANUAL_BUCKETS = {"hoard", "persona"}      # MQ has no slot names for these
 MOVE_STATUSES = ("swap", "trade", "parcel")
-SATISFIED_STATUSES = ("worn", "have", "grab")
+# "covered" = a proc-defined slot (Avatar) whose proc is already carried by another
+# slot of the same set. Nothing to fetch and nothing to do in game, so it counts as
+# satisfied rather than sitting in the blocked pile forever.
+SATISFIED_STATUSES = ("worn", "have", "grab", "covered")
+# Everything the Lua export carries. "Satisfied" means no OTHER toon has to hand the
+# piece over — it does NOT mean there is nothing to do: `have` still has to be equipped
+# out of the target's own bags and `grab` still has to be pulled from its own shared
+# bank. Exporting moves only (the pre-2026-08-09 behaviour) made those invisible in
+# game, so a set whose pieces were already sitting on the right toon equipped nothing.
+EXPORT_STATUSES = tuple(MOVE_STATUSES) + tuple(SATISFIED_STATUSES)
+# Rows that still need a hand in game. `worn` is exported for slot reservation only.
+ACTIONABLE_STATUSES = frozenset(MOVE_STATUSES) | {"have", "grab"}
 
 # EQ wearable-slot bitmask (items.txt "slots" column) — same table forge.js uses.
 # Labels match the DUMP's worn-slot names (so set items line up with snapshots);
@@ -46,6 +57,96 @@ SLOT_BITS = [("Charm", 1), ("Ear", 2 | 16), ("Head", 4), ("Face", 8), ("Neck", 3
              ("Fingers", 32768 | 65536), ("Chest", 131072), ("Legs", 262144),
              ("Feet", 524288), ("Waist", 1048576), ("Power", 2097152), ("Ammo", 4194304)]
 PAIRED_SLOTS = {"Ear", "Wrist", "Fingers"}
+# VIRTUAL slots — gear a toon must OWN and keep, but never wears. reported 2026-08-08:
+# "i need to add an avatar weapon slot incase i have one I can assign to that toon to
+# keep them reserved, effectivly tieing up 3 weapons per toon possibly." A monk wears
+# Primary+Secondary (the Fists bandolier) and keeps a third weapon in his bags purely to
+# proc Avatar; because it is not WORN, a snapshot never captured it, so nothing claimed
+# it and the router was free to hand it to somebody else. Giving it a slot makes it a
+# normal claim: reserved across sets, routed to the toon, counted by compcheck/steal.
+# These deliberately live OUTSIDE SLOT_BITS so they never count as a worn slot or as a
+# coverage hole — see _expected_slot_rows and fit_counts.
+EXTRA_SLOTS = [("Avatar", 8192 | 16384), ("2-Hander", 8192),
+               ("Mount", 0), ("WW Clicky", 0)]
+EXTRA_SLOT_NAMES = {s for s, _ in EXTRA_SLOTS}
+# 2H weapons are NOT identifiable from the slots bitmask: verified against the real item
+# DB, Wurmslayer (1H Slashing) and Jagged Blade of War (2H Slashing) are BOTH slots=8192,
+# because plenty of one-handers are primary-only too. itemtype is the discriminator -
+# 1 = 2H Slashing, 4 = 2H Blunt, 35 = 2H Piercing (Ebon Scythe / Bronzewood Staff /
+# Narandi's Lance all land correctly; Wurmslayer is type 0 and stays out).
+# Caveat worth knowing: ~1960 primary-capable items in the sodeq export carry NO itemtype
+# at all, so they cannot appear here. This slot is a deliberate manual pick, so a short
+# list is better than a wrong one.
+TWO_HAND_ITEMTYPES = {1, 4, 35}
+EXTRA_SLOT_ITEMTYPES = {"2-Hander": TWO_HAND_ITEMTYPES}
+
+# CARRIED slots — Mount and WW Clicky. reported 2026-08-09: "these are in bag things
+# really even though the mount can fit in the ammo slot". Unlike Avatar/2-Hander
+# (weapons, which the slots bitmask CAN see), these cannot be found by mask at all:
+# White Skystrider Whistle is slots=4194304 (Ammo) while Trinket of the Far Frozen
+# Wastes is slots=0, and an item with slots=0 is dropped outright by the candidate
+# scan. So they match on a PREDICATE instead, and candidates() has to stop skipping
+# slotless items for them.
+AMMO_BIT = 4194304
+MOUNT_ITEMTYPE = 68            # bridles/whistles/saddles. Verified: 294 in the sodeq
+                               # export, incl. White Skystrider Whistle (106958).
+
+
+def _is_mount(dbi):
+    return (dbi.get("itemtype", -1) or -1) == MOUNT_ITEMTYPE
+
+
+def _is_bag_clicky(dbi):
+    """A REUSABLE clicky you carry rather than wear — the Trinket of the Far Frozen
+    Wastes / Token of the Magus shape.
+
+    Three conditions, each earning its place against the real item DB:
+      clickeffect > 0   it is a clicky at all
+      maxcharges == -1  unlimited uses. This is the one that matters: without it the
+                        slot filled up with ~30 consumables off the user's real roster
+                        (Gate Potion, every Distillate, Blood of the Wolf), because a
+                        potion is also a slotless clicky. Consumables carry a finite
+                        charge count (1/3/10/20); reusable clickies carry -1.
+      no armour slot    slots=0, or Ammo — where EQ files mounts and bag oddments.
+                        Worn gear with a clicky belongs in its own real slot.
+    Deliberately NOT keyed on itemtype: the Trinket is type 72, but so are Arx Key and
+    Tolan's Darkwood Breastplate — that column is a grab-bag and would drag a
+    breastplate in here. Mounts are excluded so the two carried slots stay disjoint."""
+    if (dbi.get("clickeffect") or 0) <= 0:
+        return False
+    if _is_mount(dbi):
+        return False                       # it has its own slot
+    if (dbi.get("maxcharges", 0) or 0) != -1:
+        return False                       # consumable, not kit
+    mask = dbi.get("slots", 0) or 0
+    return mask == 0 or mask == AMMO_BIT
+
+
+CARRIED_SLOT_MATCH = {"Mount": _is_mount, "WW Clicky": _is_bag_clicky}
+# Gear that belongs to the ACCOUNT, not the character: claim rewards and mounts.
+# It can never cross to another account, so a holder on a different one is not a
+# source — offering one produces a plan step that is physically impossible to run.
+ACCOUNT_BOUND_SLOTS = frozenset({"Mount", "WW Clicky"})
+
+# PROC-DEFINED slots: the effect IS the definition of the slot, so the slots bitmask
+# is ignored entirely. reported 2026-08-09: "the only things that can give avatar are
+# primal velium weapons or ancient prismatic weapons" — confirmed against the item DB
+# and app/spell-effects.json.gz: proc 2434 resolves to "Avatar" and is carried by
+# exactly 24 items, every one of them a Primal Velium or Ancient Prismatic weapon,
+# and NOTHING else in the whole DB carries it.
+#
+# This replaces a Primary|Secondary mask that offered every weapon on the roster —
+# hundreds of picks, all but a handful useless, and the old note here ("nothing in the
+# item data marks that, so it must stay a manual pick") was simply wrong: proceffect
+# marks it exactly. Dropping the mask also matters because these are NOT all one-hand
+# slots — the Fist Wraps/Warsword sit at 24576 (Primary|Secondary) and the Primal
+# Velium Reinforced Bow at 2048 (Range), which a Primary|Secondary mask would have hidden.
+AVATAR_PROC_SPELL = 2434
+EXTRA_SLOT_PROCS = {"Avatar": AVATAR_PROC_SPELL}
+# Slots a set is expected to cover before we call a hole a hole. Charm/Range/Ammo/
+# Power sit empty on most Velious-era toons, so "no pick" there is normal — same
+# skip list the editor's "Best available" uses.
+GAP_SKIP_SLOTS = {"Charm", "Range", "Ammo", "Power"}
 AUG_ITEMTYPE = 54                          # augs carry the HOST slot's bitmask — never gear
 MAX_CANDIDATES = 60                        # per slot, ranked
 
@@ -92,6 +193,268 @@ def score_item(dbi, class_name):
     return s
 
 
+# --- a comp's gear: which set each member fields, and switching to it ---------
+#
+# `active` decides three things: which sets contend for copies, which get routed
+# into the move plan, and which comp_gear_check counts. So the active group is only
+# meaningful when it is ONE fieldable comp. Before 2026-08-09 the user had two comps'
+# sets active at once (Monk Main + Bard Main alongside four Sleeper sets), which is
+# why single-copy pieces looked permanently contested.
+
+def comp_gear_map(conn, comp_id):
+    """Which gear set this comp fields per member, plus the alternatives.
+
+    A set is a ROLE LOADOUT, not a toon's property: "Rogue Main" is the best rogue
+    kit you own, and which rogue wears it depends on the comp — Gavriel in
+    WAR/CLR/BRD/MNK/ROG/BST, while Zyrak wears Sleeper Rogue 3 in the Sleeper group.
+    So candidates are matched by CLASS, not by assigned_char_id. Matching on the
+    assignment (the first cut of this, 2026-08-09) could never offer Rogue Main to
+    Gavriel, which is exactly why he read as "no gear set".
+
+    Returns one row per occupied slot: the stored choice, else a PROPOSAL (the set
+    already pinned to this toon wins; failing that a lone class match).
+    `needs_choice` marks a slot the caller must ask about rather than guess.
+    """
+    sets = [s for s in list_sets(conn) if s["items"]]
+    by_class = {}
+    for s in sets:
+        by_class.setdefault((s["class_name"] or "").lower(), []).append(s)
+    # WHO ELSE FIELDS EACH LOADOUT, derived from the mappings — no hand-typed label.
+    # A set is shared on purpose (Rogue Main goes on Gavriel in one comp and Zyrak in
+    # another), so this never hides anything; it just says where a set is already in
+    # use so "why is this in my list?" is answered on the row itself.
+    used = {}
+    for r2 in conn.execute(
+            "SELECT s.gear_set_id AS sid, s.composition_id AS cid, c.name AS comp,"
+            "       ch.name AS toon FROM composition_slots s"
+            " JOIN compositions c ON c.id = s.composition_id"
+            " LEFT JOIN characters ch ON ch.id = s.character_id"
+            " WHERE s.gear_set_id IS NOT NULL"):
+        used.setdefault(r2["sid"], []).append(dict(r2))
+    out = []
+    for r in conn.execute(
+            "SELECT s.slot_index, s.character_id, s.gear_set_id, c.name,"
+            "       c.class_name"
+            " FROM composition_slots s LEFT JOIN characters c ON c.id = s.character_id"
+            " WHERE s.composition_id=? AND s.character_id IS NOT NULL"
+            " ORDER BY s.slot_index", (comp_id,)):
+        # Every loadout this toon's CLASS can wear. Nothing else filters it: a set is
+        # shared freely across comps, so the only wrong answer is hiding one.
+        cands = list(by_class.get((r["class_name"] or "").lower(), []))
+        cands.sort(key=lambda s: (s["id"] != r["gear_set_id"],          # this comp's pick
+                                  s["assigned_char_id"] != r["character_id"],
+                                  not s["active"], s["name"].lower()))
+        stored = next((s for s in cands if s["id"] == r["gear_set_id"]), None)
+        pinned = [s for s in cands if s["assigned_char_id"] == r["character_id"]]
+        proposed, needs = stored, False
+        if proposed is None:
+            if len(cands) <= 1:
+                # 0 candidates = no set of this class exists; reported as no_set, it
+                # must not block the apply. 1 = no alternative to weigh up.
+                proposed = cands[0] if cands else None
+            else:
+                # Several sets fit this class: ALWAYS ask. The one already pinned to
+                # this toon is offered as the default so confirming is one click, but
+                # it is never applied unseen — "it was already active/pinned" is not
+                # evidence of intent, it is how Zyrak ended up on Rogue Main inside
+                # the Sleeper group.
+                live = [s for s in pinned if s["active"]]
+                proposed = (pinned[0] if len(pinned) == 1 else
+                            live[0] if len(live) == 1 else None)
+                needs = True
+        out.append({
+            "slot_index": r["slot_index"], "character_id": r["character_id"],
+            "character": r["name"], "class_name": r["class_name"],
+            "bench": r["slot_index"] >= 6,
+            "gear_set_id": proposed["id"] if proposed else None,
+            "gear_set_name": proposed["name"] if proposed else "",
+            "stored": stored is not None,
+            # exactly what apply_comp_gear refuses on — one definition, so the panel
+            # can never show "fine" for a row the Apply button then rejects
+            "needs_choice": needs,
+            "candidates": [{"id": s["id"], "name": s["name"], "pieces": len(s["items"]),
+                            "active": bool(s["active"]),
+                            # who wears it TODAY: picking a set pinned to someone else
+                            # moves it, so the picker has to say so out loud
+                            "assigned_to": s["assigned_name"] or "",
+                            # comps already fielding it, and — separately — whether
+                            # THIS comp has it on someone else, which is the only case
+                            # that is actually unusable (one loadout, one wearer).
+                            "used_by": sorted({u["comp"] for u in used.get(s["id"], [])
+                                               if u["cid"] != comp_id}),
+                            "used_here": next((u["toon"] for u in used.get(s["id"], [])
+                                               if u["cid"] == comp_id
+                                               and u["toon"] != r["name"]), ""),
+                            "moves": bool(s["assigned_char_id"]
+                                          and s["assigned_char_id"] != r["character_id"])}
+                           for s in cands],
+        })
+    return out
+
+
+def _infer_slots(items, db=None):
+    """Give a slot to any pick that arrives without one, from the item's equip mask.
+
+    The Macro Builder import posts `slot: it.slot || ""` and its old storage does not
+    always carry one. A slotless row is INVISIBLE in the set editor (which draws one
+    row per known slot) yet still claims its item, so the user edited Sleeper Monk 2's
+    Neck and the comp check went on reporting the pick he had replaced (2026-08-09).
+    Anything still unplaceable is left blank and shown by the editor as "no slot" —
+    guessing a wrong slot would be worse than saying so.
+    """
+    blanks = [it for it in items if not (it.get("slot") or "").strip()]
+    if not blanks:
+        return {}
+    taken = set()
+    for it in items:
+        slot = (it.get("slot") or "").strip()
+        if slot:
+            taken.add((slot, int(it.get("slot_index") or 0)))
+    db = db if db is not None else gearmod.load_item_db()
+    out = {}
+    for it in blanks:
+        mask = int((db.get(int(it.get("item_id") or 0)) or {}).get("slots", 0) or 0)
+        for name, bits in SLOT_BITS:
+            if not (mask & bits):
+                continue
+            for k in range(2 if name in PAIRED_SLOTS else 1):
+                if (name, k) not in taken:
+                    taken.add((name, k))
+                    out[id(it)] = name
+                    it["slot_index"] = k
+                    break
+            if id(it) in out:
+                break
+    return out
+
+
+def set_comp_choice(conn, comp_id, character_id, gear_set_id):
+    """Record which loadout a comp fields for one member, WITHOUT activating anything.
+
+    Separate from apply_comp_gear because choosing is per-slot and applying is
+    all-or-nothing: you should be able to answer one row at a time and press Apply
+    when the six are settled. Activating a single set on its own is what produced
+    the two-comps-live-at-once state, so no UI should offer that any more.
+    """
+    row = conn.execute("SELECT 1 FROM composition_slots WHERE composition_id=?"
+                       " AND character_id=?", (comp_id, character_id)).fetchone()
+    if row is None:
+        return 404, {"ok": False, "error": "That character is not in this composition."}
+    conn.execute("UPDATE composition_slots SET gear_set_id=?"
+                 " WHERE composition_id=? AND character_id=?",
+                 (int(gear_set_id) if gear_set_id else None, comp_id, character_id))
+    conn.commit()
+    return 200, {"ok": True, "mapping": comp_gear_map(conn, comp_id)}
+
+
+def clone_set(conn, set_id, name=None):
+    """Duplicate a loadout, pieces and all — for a VARIANT, not for sharing.
+
+    Sharing needs no copy at all: map the same set in both comps and it is fielded by
+    whichever toon each one seats. Use this only when a comp wants a divergent version
+    ("Monk Main" -> "Monk Main (tank)"), knowing the copy is maintained separately.
+    """
+    src = conn.execute("SELECT * FROM gear_sets WHERE id=?", (set_id,)).fetchone()
+    if src is None:
+        return 404, {"ok": False, "error": "No such gear set."}
+    base = (name or "").strip() or "%s (copy)" % src["name"]
+    candidate, n = base, 2
+    while conn.execute("SELECT 1 FROM gear_sets WHERE name=?", (candidate,)).fetchone():
+        candidate, n = "%s %d" % (base, n), n + 1      # name is UNIQUE
+    now = int(time.time())
+    cur = conn.execute(
+        "INSERT INTO gear_sets(name, class_name, source_char_id, assigned_char_id,"
+        " active, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        (candidate, src["class_name"], src["source_char_id"], None, 0,
+         src["notes"], now, now))
+    new_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO gear_set_items(set_id, slot, slot_index, item_id, item_name)"
+        " SELECT ?, slot, slot_index, item_id, item_name FROM gear_set_items"
+        " WHERE set_id=?", (new_id, set_id))
+    conn.commit()
+    pieces = conn.execute("SELECT COUNT(*) FROM gear_set_items WHERE set_id=?",
+                          (new_id,)).fetchone()[0]
+    # active=0 and unassigned on purpose: a fresh copy claims nothing until the comp
+    # that owns it is applied, so cloning can never change what is being fielded.
+    return 200, {"ok": True, "id": new_id, "name": candidate, "pieces": pieces}
+
+
+def apply_comp_gear(conn, comp_id, choices=None):
+    """Make this comp's sets the ONLY active ones.
+
+    choices: {character_id: gear_set_id} from the picker, stored on the comp slot
+    so the next Apply needs no input. Bench slots (6+) are mapped but never
+    activated — a bench toon is a swap candidate, not someone you are gearing.
+
+    Deactivating is not destructive: it clears no picks, and re-applying the other
+    comp puts it straight back. That is the whole reason this is a flag flip rather
+    than anything that touches gear_set_items.
+    """
+    row = conn.execute("SELECT name FROM compositions WHERE id=?", (comp_id,)).fetchone()
+    if row is None:
+        return 404, {"ok": False, "error": "No such composition."}
+    for cid, sid in (choices or {}).items():
+        conn.execute("UPDATE composition_slots SET gear_set_id=?"
+                     " WHERE composition_id=? AND character_id=?",
+                     (int(sid) if sid else None, comp_id, int(cid)))
+    mapping = comp_gear_map(conn, comp_id)
+    unresolved = [m["character"] for m in mapping
+                  if not m["bench"] and m["needs_choice"]]
+    if unresolved:
+        return 409, {"ok": False, "needs_choice": True, "mapping": mapping,
+                     "error": "Pick a gear set for: " + ", ".join(unresolved)}
+    # One loadout cannot be worn by two toons at once — it would claim every piece
+    # twice and the move plan would promise the same physical item to both.
+    seen = {}
+    for m in mapping:
+        if m["bench"] or not m["gear_set_id"]:
+            continue
+        if m["gear_set_id"] in seen:
+            return 409, {"ok": False, "needs_choice": True, "mapping": mapping,
+                         "error": "%s is picked for both %s and %s — one loadout per "
+                                  "toon." % (m["gear_set_name"],
+                                             seen[m["gear_set_id"]], m["character"])}
+        seen[m["gear_set_id"]] = m["character"]
+    # persist whatever we proposed, so Apply is a one-click repeat from now on
+    for m in mapping:
+        if m["gear_set_id"] and not m["stored"]:
+            conn.execute("UPDATE composition_slots SET gear_set_id=?"
+                         " WHERE composition_id=? AND character_id=?",
+                         (m["gear_set_id"], comp_id, m["character_id"]))
+    keep = {m["gear_set_id"] for m in mapping if m["gear_set_id"] and not m["bench"]}
+    was = {r["id"]: (r["name"], bool(r["active"]), r["assigned_char_id"])
+           for r in conn.execute(
+               "SELECT id, name, active, assigned_char_id FROM gear_sets")}
+    # RETARGET. assigned_char_id is "who wears this loadout now", not ownership, so
+    # fielding a comp points its sets at that comp's toons: Rogue Main goes to Gavriel
+    # in WAR/CLR/BRD/MNK/ROG/BST and back to Zyrak in whatever comp maps it to him.
+    # Everything downstream (build_plans, comp_gear_check) routes off this column, so
+    # retargeting here is what makes the move plan address the right character.
+    moved = []
+    for m in mapping:
+        if m["bench"] or not m["gear_set_id"]:
+            continue
+        prev = was.get(m["gear_set_id"], (None, None, None))[2]
+        if prev != m["character_id"]:
+            conn.execute("UPDATE gear_sets SET assigned_char_id=? WHERE id=?",
+                         (m["character_id"], m["gear_set_id"]))
+            moved.append({"set": m["gear_set_name"], "to": m["character"],
+                          "from": (conn.execute("SELECT name FROM characters WHERE id=?",
+                                                (prev,)).fetchone() or [""])[0]
+                                  if prev else ""})
+    conn.execute("UPDATE gear_sets SET active = CASE WHEN id IN (%s) THEN 1 ELSE 0 END"
+                 % (",".join("?" * len(keep)) or "NULL"), list(keep))
+    conn.commit()
+    activated = sorted(was[i][0] for i in keep if i in was and not was[i][1])
+    deactivated = sorted(n for i, (n, a, _) in was.items() if a and i not in keep)
+    no_set = [m["character"] for m in mapping
+              if not m["bench"] and not m["gear_set_id"]]
+    return 200, {"ok": True, "comp": row["name"], "active": len(keep),
+                 "activated": activated, "deactivated": deactivated,
+                 "retargeted": moved, "no_set": no_set, "mapping": mapping}
+
+
 # --- sets CRUD ---------------------------------------------------------------
 
 def list_sets(conn):
@@ -111,16 +474,22 @@ def list_sets(conn):
     return sets
 
 
-def save_set(conn, payload, set_id=None, eq_dir=None):
+def save_set(conn, payload, set_id=None, eq_dir=None, db=None):
     """Create/update a set. payload: name, class_name, source_char_id,
     assigned_char_id, active, notes, items:[{item_id,item_name,slot,slot_index}].
     Items are replaced only when the payload carries an "items" key.
 
-    payload["steal"]: when this save over-claims an item (active sets together now
-    want more copies than the roster owns), TAKE the shortfall from other active
-    sets — one claim per copy short, donors in set-id order — and report what was
-    taken. Copies are fungible, so this only fires when copies are actually short;
-    owning spares means nobody loses anything. Needs eq_dir for owned counts."""
+    A save NEVER touches another set's rows. A set records what you want that toon
+    to wear, so the same piece may appear in as many sets as you like — contention
+    is REPORTED, never resolved by deletion. Returns payload["contested"]: the
+    items active sets collectively want more copies of than the roster owns, and
+    who else wants them. Needs eq_dir for owned counts; without it, no report.
+
+    (Until 2026-08-09 this ran _steal_overclaims, which DELETED the shortfall from
+    other active sets. It silently destroyed Monk Main's Arms/Back/Head/Ear picks.
+    The routing layer already degrades gracefully on contention — it emits a
+    "reserved" row naming the owners — so the deletion bought nothing and cost
+    The user's stated intent.)"""
     now = int(time.time())
     if set_id is None:
         name = (payload.get("name") or "").strip()
@@ -155,11 +524,12 @@ def save_set(conn, payload, set_id=None, eq_dir=None):
     if "items" in payload:
         conn.execute("DELETE FROM gear_set_items WHERE set_id=?", (set_id,))
         seen = {}
+        filled = _infer_slots(payload.get("items") or [], db)
         for it in payload.get("items") or []:
             iid = int(it.get("item_id") or 0)
             if iid <= 0:
                 continue
-            slot = (it.get("slot") or "").strip()
+            slot = (it.get("slot") or "").strip() or filled.get(id(it), "")
             k = it.get("slot_index")
             if k is None:
                 k = seen.get(slot, 0)
@@ -168,42 +538,35 @@ def save_set(conn, payload, set_id=None, eq_dir=None):
                 "INSERT OR REPLACE INTO gear_set_items(set_id, slot, slot_index,"
                 " item_id, item_name) VALUES (?,?,?,?,?)",
                 (set_id, slot, int(k), iid, it.get("item_name") or ""))
-    taken = []
-    if payload.get("steal") and "items" in payload and eq_dir:
-        taken = _steal_overclaims(conn, set_id, eq_dir)
+    contested = _contested(conn, set_id, eq_dir) if "items" in payload and eq_dir else []
     conn.commit()
-    return 200, {"ok": True, "id": set_id, "taken": taken}
+    return 200, {"ok": True, "id": set_id, "contested": contested}
 
 
-def _steal_overclaims(conn, set_id, eq_dir):
-    """For every item this set claims beyond what the roster owns (counting all
-    ACTIVE sets), delete surplus claims from OTHER active sets. Returns
-    [{"item", "from_set"}] describing what was taken."""
-    world = _load_world(conn, eq_dir)
-    holdings = _holdings(world)
+def _contested(conn, set_id, eq_dir):
+    """Items THIS set picks that all active sets together want more copies of than
+    the roster owns. Read-only — nothing is deleted or reassigned. Returns
+    [{"item", "want", "owned", "other_sets"}], worst shortfall first."""
+    holdings = _holdings(_load_world(conn, eq_dir))
     owned = {iid: sum(e["count"] for e in entries) for iid, entries in holdings.items()}
-    my_counts = {}
+    mine = {}
     for r in conn.execute("SELECT item_id, item_name FROM gear_set_items WHERE set_id=?",
                           (set_id,)):
-        my_counts.setdefault(r["item_id"], {"name": r["item_name"], "n": 0})["n"] += 1
-    taken = []
-    for iid, mine in my_counts.items():
-        total = conn.execute("""
-            SELECT COUNT(*) FROM gear_set_items gi JOIN gear_sets g ON g.id = gi.set_id
-            WHERE gi.item_id=? AND g.active=1""", (iid,)).fetchone()[0]
-        over = total - owned.get(iid, 0)
-        while over > 0:
-            row = conn.execute("""
-                SELECT gi.rowid AS rid, g.name AS set_name
-                FROM gear_set_items gi JOIN gear_sets g ON g.id = gi.set_id
-                WHERE gi.item_id=? AND g.active=1 AND gi.set_id != ?
-                ORDER BY g.id LIMIT 1""", (iid, set_id)).fetchone()
-            if row is None:
-                break               # only this set claims it (e.g. both ears, 1 copy)
-            conn.execute("DELETE FROM gear_set_items WHERE rowid=?", (row["rid"],))
-            taken.append({"item": mine["name"], "from_set": row["set_name"]})
-            over -= 1
-    return taken
+        mine.setdefault(r["item_id"], r["item_name"])
+    out = []
+    for iid, name in mine.items():
+        rows = conn.execute("""
+            SELECT g.id AS gid, g.name AS set_name FROM gear_set_items gi
+            JOIN gear_sets g ON g.id = gi.set_id
+            WHERE gi.item_id=? AND g.active=1""", (iid,)).fetchall()
+        have = owned.get(iid, 0)
+        if len(rows) <= have:
+            continue                # spares to go round — nobody is short
+        others = sorted({r["set_name"] for r in rows if r["gid"] != set_id})
+        out.append({"item": name, "want": len(rows), "owned": have,
+                    "other_sets": others})
+    out.sort(key=lambda c: (c["owned"] - c["want"], c["item"]))
+    return out
 
 
 def snapshot(conn, eq_dir, char_id, name=None):
@@ -225,6 +588,19 @@ def snapshot(conn, eq_dir, char_id, name=None):
         k = seen.get(slot, 0)
         seen[slot] = k + 1
         items.append({"item_id": iid, "item_name": nm, "slot": slot, "slot_index": k})
+    # CARRY THE VIRTUAL SLOTS FORWARD. A same-name save overwrites the existing set and
+    # save_set DELETEs every row before re-inserting, so without this a re-snapshot would
+    # silently drop the Avatar weapon claim - the dump has no "Avatar" slot to restore it
+    # from. Re-snapshotting is routine (any gear change), so the loss would be invisible
+    # until the router quietly gave the weapon to somebody else. Same shape as the
+    # 2026-07-02 override-corruption bug: a write path that destroys data it never read.
+    prior = conn.execute(
+        "SELECT i.slot, i.slot_index, i.item_id, i.item_name FROM gear_set_items i"
+        " JOIN gear_sets s ON s.id = i.set_id WHERE s.name = ?", (name,)).fetchall()
+    for r in prior:
+        if r["slot"] in EXTRA_SLOT_NAMES:
+            items.append({"item_id": r["item_id"], "item_name": r["item_name"],
+                          "slot": r["slot"], "slot_index": r["slot_index"]})
     code, res = save_set(conn, {
         "name": name, "class_name": char["class_name"] or "",
         "source_char_id": char_id, "assigned_char_id": char_id,
@@ -389,11 +765,16 @@ def _holdings(world):
 
 # --- the planner -------------------------------------------------------------
 
-def build_plans(conn, eq_dir, login_ids=None, db=None, stale_h=None):
+def build_plans(conn, eq_dir, login_ids=None, db=None, stale_h=None,
+                focus_ids=None, world=None):
     """Route every active set's pieces. All active sets are planned TOGETHER so the
     one-copy-one-promise reservation math holds across sets (the '33 rows for 24
     items' bug class). login_ids = char ids currently online (the login set) —
     holders in it get the trade route (no extra login needed).
+
+    focus_ids: narrow what comes BACK to the sets targeting these toons (a comp).
+    Every active set is still PLANNED — focus only filters the result — otherwise a
+    comp would read clean while quietly taking a piece another set is promised.
 
     stale_h: dumps older than this mark their rows `stale_source`. The planner still
     routes them — it does NOT refuse — because a stale dump is usually still right;
@@ -401,7 +782,7 @@ def build_plans(conn, eq_dir, login_ids=None, db=None, stale_h=None):
     """
     db = db or gearmod.load_item_db()
     stale_h = int(stale_h) if stale_h else harvestmod.DEFAULT_STALE_H
-    world = _load_world(conn, eq_dir)
+    world = world or _load_world(conn, eq_dir)
     holdings = _holdings(world)
     shared_cap = _shared_by_account(world)
     login = {int(x) for x in (login_ids or []) if x}
@@ -476,6 +857,35 @@ def build_plans(conn, eq_dir, login_ids=None, db=None, stale_h=None):
             plan["shared_bank"] = None
         plans.append(plan)
 
+    # Name the rival on every "reserved" row. _route_item can only list holders that
+    # were routed THROUGH it, and the commonest rival wins the copy on the worn fast
+    # path (line ~630), which never records a claim — so the note came out as a bare
+    # "every copy is promised elsewhere". Since 2026-08-09 contention is the ONLY
+    # signal that a set can't be fielded (saves no longer delete the loser's pick),
+    # an anonymous one is not good enough.
+    want = {}
+    for s in sets:
+        for it in s["items"]:
+            want.setdefault(it["item_id"], []).append(s["name"])
+    for p in plans:
+        for r in p["rows"]:
+            if r["status"] != "reserved":
+                continue
+            rivals = sorted({n for n in want.get(r["item_id"], []) if n != p["name"]})
+            if rivals:
+                r["note"] = ("every copy is promised elsewhere: "
+                             + ", ".join(rivals[:4])
+                             + (" +%d more" % (len(rivals) - 4) if len(rivals) > 4 else ""))
+
+    focus = {int(x) for x in (focus_ids or []) if x}
+    if focus:
+        # Work order + totals are recomputed over the focused sets only: "who do I
+        # log in to gear THIS comp", not the whole roster.
+        shown = [p for p in plans if p.get("target") and p["target"]["id"] in focus]
+        return {"plans": shown, "workorder": _workorder(shown, world),
+                "summary": _summary(shown, stale_h),
+                "focus": {"char_ids": sorted(focus), "planned_sets": len(plans),
+                          "shown_sets": len(shown)}}
     return {"plans": plans, "workorder": _workorder(plans, world),
             "summary": _summary(plans, stale_h)}
 
@@ -486,6 +896,26 @@ def _age_of(row, mtime, now, stale_h):
     row["stale_source"] = (row["source_age_h"] is not None
                            and row["source_age_h"] >= stale_h)
     return row
+
+
+def _proc_covered(it, s, db):
+    """Other rows of this set that already carry the proc this virtual slot exists for.
+
+    The Avatar slot means "keep a weapon that procs Avatar". If another slot of the
+    same set already holds one, the slot is satisfied — including the case where it
+    names the very same item. Returns [] for ordinary slots.
+    """
+    slot_proc = EXTRA_SLOT_PROCS.get(it["slot"])
+    if not slot_proc:
+        return []
+    out = []
+    for i in s["items"]:
+        if i["slot"] == it["slot"] and i["slot_index"] == it["slot_index"]:
+            continue
+        other = db.get(i["item_id"]) or {}
+        if int(other.get("proceffect", 0) or 0) == slot_proc:
+            out.append(i)
+    return out
 
 
 def _route_item(it, s, target, have_worn, have_held, holdings, db, login,
@@ -527,6 +957,24 @@ def _route_item(it, s, target, have_worn, have_held, holdings, db, login,
                         break
             return _age_of(row, tgt_mtime, now, stale_h)
 
+    # PROC-DEFINED slot (Avatar) already covered by another row of this same set. Past
+    # this point every path SOURCES FROM ANOTHER TOON, and that is the one thing a
+    # redundant Avatar claim must never do: Beastlord Main names the same Primal Velium
+    # Brawl Stick in both 2-Hander and Avatar, Scavo's own copy satisfied the first
+    # row, and the second told the user to log in Rokhan and mail his copy across for
+    # nothing (2026-08-10). Deliberately BELOW the have/worn checks — a toon that
+    # already holds two copies keeps both claimed ("effectivly tieing up 3 weapons per
+    # toon", the user 2026-08-08); the rule is only "don't go shopping for a spare you
+    # don't need". It used to live in the "nobody owns one" branch, so it fired only
+    # when the item was unobtainable — the moment a sibling had one, routing won.
+    covers = _proc_covered(it, s, db)
+    if covers:
+        row["status"] = "covered"
+        row["note"] = ("already covered — %s procs this too; clear this slot"
+                       % ", ".join("%s (%s)" % (i["item_name"], i["slot"])
+                                   for i in covers[:3]))
+        return row
+
     # LORE: one copy per character, ever. If this set already sourced one, a second
     # is impossible; if the target owns one anywhere it would have matched above.
     lore = int(dbi.get("loregroup", 0) or 0) == -1
@@ -538,7 +986,32 @@ def _route_item(it, s, target, have_worn, have_held, holdings, db, login,
     movable = int(dbi.get("fvnodrop", 0) or 0) == 0
     cands = [e for e in holdings.get(iid, []) if e["char_id"] != target["id"]
              or e["bucket"] == "shared"]
-    if not movable:
+
+    # ACCOUNT-BOUND slots (Mount / WW Clicky). A claim reward or mount belongs to the
+    # account, so a copy on another account is not a source at all — it cannot be
+    # traded, parcelled or banked across. Cutting those candidates here (rather than
+    # letting the ladder pick one and blocking later) is what makes the note useful:
+    # otherwise the row read "NO TRADE — Gunkrat has one", naming a toon on an
+    # account that physically cannot hand it over.
+    acct_bound = it["slot"] in ACCOUNT_BOUND_SLOTS
+    if acct_bound:
+        tacct = target["account_id"]
+        cands = [e for e in cands
+                 if tacct is not None and e["account_id"] == tacct]
+        if not cands:
+            row["status"] = "missing"
+            row["note"] = ("account-bound — nobody on %s has one"
+                           % (target["account_alias"] or "this account"))
+            return row
+
+    # Account-bound claim gear (mounts, claim clickies) is NO TRADE, so it can never be
+    # traded or parcelled — but it CAN move through the account's SHARED BANK. The user
+    # 2026-08-09: "that item cant be parceled but it can be put in the shared bank."
+    # cands are already cut to this account, so letting the normal ladder run yields
+    # exactly the right instruction — grab it out of the shared bank, or log the
+    # sibling holding it and drop it in there first — instead of a dead "NO TRADE"
+    # that named a holder and then told you nothing could be done with them.
+    if not movable and not acct_bound:
         row["status"] = "notrade"
         row["note"] = ("NO TRADE (fvnodrop)" +
                        (" — %s has one" % cands[0]["holder"] if cands else ""))
@@ -572,8 +1045,24 @@ def _route_item(it, s, target, have_worn, have_held, holdings, db, login,
             row["note"] = ("every copy is promised elsewhere" +
                            (": " + ", ".join(owners[:4]) if owners else ""))
         else:
-            row["status"] = "missing"
-            row["note"] = "nobody on the roster has one"
+            owned = sum(e["count"] for e in holdings.get(iid, []))
+            if owned > 0:
+                # You DO own it. Every copy is on the TARGET and an earlier row of THIS
+                # SAME SET already consumed it, so cands came back empty and the old
+                # message said "nobody on the roster has one" — flatly wrong, and it
+                # sent the user hunting for an item sitting in Scavo's own bags
+                # (2026-08-09). Scavo's Primal Velium Brawl Stick is itemtype 4 AND
+                # procs Avatar, so it is a legitimate pick for the 2-Hander slot or the
+                # Avatar slot — just not both at once on one copy.
+                want = sum(1 for i in s["items"] if i["item_id"] == iid)
+                slots = sorted({i["slot"] for i in s["items"] if i["item_id"] == iid})
+                row["status"] = "shortfall"
+                row["note"] = ("this set claims it %d× (%s) but you only own %d — free a "
+                               "slot or find another copy"
+                               % (want, ", ".join(slots), owned))
+            else:
+                row["status"] = "missing"
+                row["note"] = "nobody on the roster has one"
         return row
 
     _, e, grab, same, online = best
@@ -661,37 +1150,69 @@ def _lua_str(s):
 
 def build_plans_lua(plan_result):
     """Same shape mailgear.lua / TrixBox already parse: a `plans` list plus the
-    first plan mirrored at top level for older builds. Returns None if no moves."""
+    first plan mirrored at top level for older builds. Returns None if there is
+    nothing to do in game.
+
+    Each plan carries TWO row lists:
+      moves — swap/trade/parcel only. Unchanged shape, unchanged contents: this is
+              what old TrixBox/mailgear builds read, and what the parcel filter is
+              counted from. Never widen it.
+      rows  — EVERY routed piece, `worn`/`have`/`grab` included, each stamped with
+              status/bucket/slotIndex. New mailgear reads this and falls back to
+              `moves` when an older export has no `rows`.
+
+    Why `rows` had to exist (reported 2026-08-09: "doesnt equip items that are already
+    on the toon, sitting in their bag"): a piece already in the target's own bags
+    routes as `have` — the plan literally says "just equip it" — but `have` is not
+    in MOVE_STATUSES, so it never reached the Lua and /mailgear equip could not see
+    it. Same for `grab` (the target's own shared bank). Exporting only the moves
+    silently made the cheapest half of every plan un-executable.
+
+    `worn` rows carry no work, but they are exported anyway: they are how the equip
+    step knows a paired slot is ALREADY holding a piece this set wants, so it must
+    not be overwritten (see doEquipItem's slot reservation)."""
     plans = []
     for p in plan_result["plans"]:
         if not p.get("target"):
             continue
+        rows = [r for r in p["rows"] if r["status"] in EXPORT_STATUSES]
         moves = [r for r in p["rows"] if r["status"] in MOVE_STATUSES]
-        if moves:
+        if any(r["status"] in ACTIONABLE_STATUSES for r in rows):
             plans.append({"name": p["name"], "target": p["target"]["name"],
-                          "moves": moves})
+                          "moves": moves, "rows": rows})
     if not plans:
         return None
 
     def move_lua(r, target, indent):
-        return ("%s{ id = %d, name = %s, from = %s, to = %s, slot = %s, "
-                "fromLoc = %s, attuneRisk = %s },"
+        # from = the OTHER toon you take it from. Deliberately empty for worn/have/
+        # grab: nobody hands those over, they are already on the target, so mailgear's
+        # mineFrom() must not put them in a holder's dequeue queue. status/bucket are
+        # what the equip side branches on instead.
+        return ("%s{ id = %d, name = %s, from = %s, to = %s, slot = %s, slotIndex = %d, "
+                "status = %s, bucket = %s, fromLoc = %s, attuneRisk = %s },"
                 % (indent, r["item_id"] or 0, _lua_str(r["item_name"]),
                    _lua_str(r["holder"]), _lua_str(target), _lua_str(r["slot"]),
+                   int(r.get("slot_index") or 0),
+                   _lua_str(r["status"]), _lua_str(r.get("bucket") or ""),
                    _lua_str(r["from_loc"]),
                    "true" if r["attune_risk"] else "false"))
 
     plan_blocks = []
     for p in plans:
         moves = "\n".join(move_lua(r, p["target"], "      ") for r in p["moves"])
+        rows = "\n".join(move_lua(r, p["target"], "      ") for r in p["rows"])
         plan_blocks.append(
             "    { name = %s, set = %s, target = %s,\n"
-            "      moves = {\n%s\n      } }," %
-            (_lua_str(p["name"]), _lua_str(p["name"]), _lua_str(p["target"]), moves))
+            "      moves = {\n%s\n      },\n"
+            "      rows = {\n%s\n      } }," %
+            (_lua_str(p["name"]), _lua_str(p["name"]), _lua_str(p["target"]),
+             moves, rows))
     first = plans[0]
     first_moves = "\n".join(move_lua(r, first["target"], "    ") for r in first["moves"])
     header = ("-- Gear plans - generated by EQ Forge My Characters (Gear Sets)\n" +
-              "\n".join("--   %s -> %s (%d move(s))" % (p["name"], p["target"], len(p["moves"]))
+              "\n".join("--   %s -> %s (%d move(s), %d already on the target)"
+                        % (p["name"], p["target"], len(p["moves"]),
+                           sum(1 for r in p["rows"] if r["status"] in ("have", "grab")))
                         for p in plans) + "\n" +
               "-- In game (mailgear): /mailgear plans, /mailgear dequip (on a holder),\n"
               "-- /mailgear getbank (at a banker), /mailgear equip (on the target).\n"
@@ -701,10 +1222,28 @@ def build_plans_lua(plan_result):
             "  name = %s, set = %s, target = %s,\n  moves = {\n%s\n  },\n}\n" %
             (_lua_str(first["name"]), _lua_str(first["name"]),
              _lua_str(first["target"]), first_moves))
+    def _need(moves):
+        """holder -> item id -> HOW MANY copies that holder owes this plan.
+        The parcel filter used to be a bare id set, which silently over-sent two ways:
+        a holder with 2 spare copies of a wanted item sent BOTH (reported 2026-08-08:
+        Damaris queued two Mask of War when the work order said one), and any holder
+        who logged in matched the WHOLE plan's ids, including rows assigned to a
+        different holder. Counting per holder is what makes the parcel window agree
+        with the work order."""
+        need = {}
+        for r in moves:
+            iid, holder = r["item_id"], r["holder"]
+            if not iid or not holder:
+                continue
+            need.setdefault(holder, {})
+            need[holder][iid] = need[holder].get(iid, 0) + 1
+        return need
+
     return {"text": text,
             "plans": [{"name": p["name"], "target": p["target"],
                        "count": len(p["moves"]),
-                       "ids": sorted({r["item_id"] for r in p["moves"] if r["item_id"]})}
+                       "ids": sorted({r["item_id"] for r in p["moves"] if r["item_id"]}),
+                       "need": _need(p["moves"])}
                       for p in plans]}
 
 
@@ -712,16 +1251,57 @@ def build_parcel_source_lua(plans_meta):
     """Parcel-tool source filters for the exported plans (see forge.js version)."""
     blocks = []
     for p in plans_meta:
-        id_table = ", ".join("[%d]=true" % i for i in p["ids"])
+        need = p.get("need") or {}
+        # holder -> { [itemid] = copies owed }. Emitted per holder so the filter can
+        # scope itself to whoever is logged in.
+        need_rows = "\n".join(
+            "                [%s] = { %s },"
+            % (_lua_str(holder), ", ".join("[%d]=%d" % (i, n)
+                                           for i, n in sorted(items.items())))
+            for holder, items in sorted(need.items()))
         blocks.append(
             "    {\n"
             "        name = %s,\n"
-            "        filter = function(item)\n"
-            "            local ids = { %s }\n"
-            "            return ids[(item.ID() or 0)] == true\n"
-            "        end,\n"
+            # The plan already knows who it is for, so the parcel tool fills "Send To"
+            # from this the moment the source is picked. reported 2026-08-08: "i cant tell
+            # you how many times i select the gearplan and i forgot to change the send
+            # to" - retyping a name you already told the app is a mis-SEND waiting to
+            # happen, not a typo, and gear that goes to the wrong toon has to be mailed
+            # back by hand.
+            "        target = %s,\n"
+            "        filter = (function()\n"
+            "            local mq = require('mq')\n"
+            "            local need = {\n%s\n            }\n"
+            "            -- getFilteredItems() re-runs this filter from scratch on every\n"
+            "            -- scan (source pick, Recheck) but gives us no start-of-scan hook,\n"
+            "            -- so the per-scan tally is reset by a TIME GAP: a whole scan runs\n"
+            "            -- inside one frame, while any two scans are far more than 500ms\n"
+            "            -- apart. Without the reset the counters stay exhausted and the\n"
+            "            -- second scan would show nothing.\n"
+            "            local taken, lastT = {}, -99999\n"
+            "            local function nowMs()\n"
+            "                if mq and mq.gettime then return mq.gettime() end\n"
+            "                return (os.clock() or 0) * 1000\n"
+            "            end\n"
+            "            return function(item)\n"
+            "                local t = nowMs()\n"
+            "                if (t - lastT) > 500 then taken = {} end\n"
+            "                lastT = t\n"
+            "                local me = mq.TLO.Me.CleanName() or ''\n"
+            "                local mine = need[me]\n"
+            "                if not mine then return false end\n"
+            "                local id = item.ID() or 0\n"
+            "                local want = mine[id] or 0\n"
+            "                if want == 0 then return false end\n"
+            "                local got = taken[id] or 0\n"
+            "                if got >= want then return false end\n"
+            "                taken[id] = got + 1\n"
+            "                return true\n"
+            "            end\n"
+            "        end)(),\n"
             "    }," % (_lua_str("Gear Plan: %s -> %s (%d)" %
-                                 (p["name"], p["target"], len(p["ids"]))), id_table))
+                                 (p["name"], p["target"], len(p["ids"]))),
+                        _lua_str(p["target"]), need_rows))
     return ("-- Auto-generated by EQ Forge My Characters (Gear Sets) - do NOT hand-edit.\n"
             "-- Chain-loaded by config/parcel_sources.lua so the current gear plan appears\n"
             "-- as a pickable source in DerpleDude's parcel tool. Review there, then Send.\n" +
@@ -790,7 +1370,14 @@ def candidates(conn, eq_dir, class_name=None, exclude_set_id=None, db=None,
         if dbi is None:
             continue
         mask = dbi.get("slots", 0)
-        if not mask or dbi.get("itemtype", 0) == AUG_ITEMTYPE:
+        if dbi.get("itemtype", 0) == AUG_ITEMTYPE:
+            continue
+        # A slotless item is normally junk to a gear set — EXCEPT for the carried
+        # slots, whose whole point is gear with no slot of its own. Before this,
+        # `if not mask: continue` silently made Trinket of the Far Frozen Wastes
+        # (slots=0) unpickable no matter what the editor offered.
+        carried = [s for s, ok in CARRIED_SLOT_MATCH.items() if ok(dbi)]
+        if not mask and not carried:
             continue
         cmask = dbi.get("classes", 0)
         if bit is not None and cmask not in (0, 65535) and not (cmask & bit):
@@ -839,6 +1426,13 @@ def candidates(conn, eq_dir, class_name=None, exclude_set_id=None, db=None,
             "reserved_by": claim_names.get(iid, []),
             "fvnodrop": dbi.get("fvnodrop", 0), "lore": dbi.get("loregroup", 0) == -1,
             "slots_mask": mask,
+            "itemtype": dbi.get("itemtype", -1),
+            "proceffect": dbi.get("proceffect", 0) or 0,
+            "carried": carried,
+            # Which accounts hold a copy — the account-bound slots filter on this so
+            # the editor never offers a mount that lives on an account the target
+            # cannot reach.
+            "account_ids": sorted({e["account_id"] for e in entries if e["account_id"]}),
             # Full stat block + named effects so the editor can show a real item card
             # and stat deltas instead of a truncated dropdown label. Sparse (zeros
             # dropped) because this ships up to 21 slots x MAX_CANDIDATES rows.
@@ -848,11 +1442,35 @@ def candidates(conn, eq_dir, class_name=None, exclude_set_id=None, db=None,
         }
 
     out = []
-    for slot, sbits in SLOT_BITS:
-        items = [c for c in per_item.values() if c["slots_mask"] & sbits]
-        items.sort(key=lambda c: (-c["score"], -c["ac"], -c["hp"], c["name"]))
+    for slot, sbits in SLOT_BITS + EXTRA_SLOTS:
+        match = CARRIED_SLOT_MATCH.get(slot)
+        proc = EXTRA_SLOT_PROCS.get(slot)
+        if match:
+            # Carried slots ignore the bitmask entirely (that is the point) and are
+            # ranked by NAME: score_item is a stat sum, and a mount or a port clicky
+            # has no stats, so ranking them by score would be arbitrary noise.
+            items = [c for c in per_item.values() if slot in c["carried"]]
+            items.sort(key=lambda c: c["name"])
+        elif proc:
+            # The proc IS the slot. Mask ignored on purpose — Avatar weapons span
+            # Primary, Primary|Secondary and Range.
+            items = [c for c in per_item.values() if c["proceffect"] == proc]
+            items.sort(key=lambda c: (-c["score"], -c["ac"], -c["hp"], c["name"]))
+        else:
+            items = [c for c in per_item.values() if c["slots_mask"] & sbits]
+            types = EXTRA_SLOT_ITEMTYPES.get(slot)
+            if types:
+                items = [c for c in items if c["itemtype"] in types]
+            items.sort(key=lambda c: (-c["score"], -c["ac"], -c["hp"], c["name"]))
+        if slot in ACCOUNT_BOUND_SLOTS and tacct:
+            items = [c for c in items if tacct in c["account_ids"]]
         out.append({"slot": slot, "paired": slot in PAIRED_SLOTS,
-                    "items": [{k: v for k, v in c.items() if k != "slots_mask"}
+                    "extra": slot in EXTRA_SLOT_NAMES,
+                    "carried": bool(match),
+                    "account_bound": slot in ACCOUNT_BOUND_SLOTS,
+                    "items": [{k: v for k, v in c.items()
+                               if k not in ("slots_mask", "itemtype", "carried",
+                                            "account_ids", "proceffect")}
                               for c in items[:MAX_CANDIDATES]]})
     return {"slots": out, "class_name": class_name or "",
             # "" = no target; race name = filtering; None = target has no race
@@ -862,13 +1480,13 @@ def candidates(conn, eq_dir, class_name=None, exclude_set_id=None, db=None,
 
 # --- comp gear check: can the roster fill every live member's set at once? -----
 
-def comp_gear_check(conn, eq_dir, char_ids):
+def comp_gear_check(conn, eq_dir, char_ids, world=None):
     """For the comp's live toons: does everyone have an active set, and are there
     enough physical copies across the WHOLE roster to fill all of them at once?
     Pure counting (dumps only, no item DB) so it's fast enough to run on every
     comp edit. A toon's newest active assigned set is 'their' set."""
     char_ids = [int(x) for x in (char_ids or []) if x]
-    world = _load_world(conn, eq_dir)
+    world = world or _load_world(conn, eq_dir)
     holdings = _holdings(world)
     owned = {iid: sum(e["count"] for e in entries) for iid, entries in holdings.items()}
     active = [s for s in list_sets(conn) if s["active"] and s["items"]]
@@ -929,18 +1547,124 @@ def comp_gear_check(conn, eq_dir, char_ids):
     return {"toons": toons, "no_set": no_set, "overlaps": overlaps, "outside": outside}
 
 
+# --- comp readiness: one row per live member, straight off the routed plan -----
+
+def _expected_slot_rows():
+    """Every slot row a complete set covers (paired slots twice), minus the ones
+    that are legitimately empty in this era."""
+    rows = []
+    for slot, _ in SLOT_BITS:
+        if slot in GAP_SKIP_SLOTS:
+            continue
+        rows.append((slot, 0))
+        if slot in PAIRED_SLOTS:
+            rows.append((slot, 1))
+    return rows
+
+
+# Worst first — the order the UI sorts and colours by.
+READINESS_STATES = ("noset", "blocked", "moves", "onhand", "ready")
+
+
+def comp_readiness(conn, eq_dir, char_ids, login_ids=None, stale_h=None, db=None):
+    """'Can I field this comp right now?' — one row per live member, derived from
+    the SAME routed plan the Move Plan renders, so the two can never disagree.
+
+    Per member: their active set, how much of it is already on their body, what is
+    still inbound (and by which route), what is blocked outright, and which slots
+    the set does not cover at all. States, worst first: no set assigned → blocked
+    (a piece nobody can deliver) → moves pending → on hand but not worn → ready.
+    """
+    char_ids = [int(x) for x in (char_ids or []) if x]
+    stale_h = int(stale_h) if stale_h else harvestmod.DEFAULT_STALE_H
+    world = _load_world(conn, eq_dir)
+    plan = build_plans(conn, eq_dir, login_ids, db=db, stale_h=stale_h,
+                       focus_ids=char_ids, world=world)
+    check = comp_gear_check(conn, eq_dir, char_ids, world=world)
+    by_target = {p["target"]["id"]: p for p in plan["plans"] if p.get("target")}
+    expected = _expected_slot_rows()
+    now = int(time.time())
+    # Sets a member owns that the plan ignored (retired, or emptied). Without this a
+    # toon with a perfectly good retired set reads "no set", and the obvious fix —
+    # snapshot them — quietly builds a duplicate instead of ticking Active.
+    shelved = {}
+    for s in list_sets(conn):
+        tgt = s["assigned_char_id"] or s["source_char_id"]
+        if tgt and not (s["active"] and s["items"]):
+            shelved.setdefault(tgt, []).append(
+                {"id": s["id"], "name": s["name"], "pieces": len(s["items"]),
+                 "active": bool(s["active"])})
+
+    members = []
+    for cid in char_ids:
+        c = world["by_id"].get(cid)
+        if c is None:
+            continue
+        m = {"char_id": cid, "name": c["name"], "class_name": c["class_name"] or "",
+             "account_alias": c["account_alias"] or "",
+             "dumped": cid in world["inv"],
+             "dump_age_h": ((now - world["mtimes"][cid]) // 3600
+                            if cid in world["mtimes"] else None),
+             "set_id": None, "set_name": "", "pieces": 0, "gaps": [],
+             "equipped": 0, "on_hand": 0, "incoming": {}, "blocked": [],
+             "stale_moves": 0, "state": "noset",
+             "shelved_sets": shelved.get(cid, [])}
+        p = by_target.get(cid)
+        if p is None:
+            # "retired" = they have one, it just isn't switched on. Different fix.
+            m["reason"] = "retired" if m["shelved_sets"] else "none"
+            members.append(m)
+            continue
+        m["set_id"], m["set_name"] = p["set_id"], p["name"]
+        m["pieces"] = len(p["rows"])
+        filled = {(r["slot"], r["slot_index"]) for r in p["rows"]}
+        m["gaps"] = [s if i == 0 else s + " 2"
+                     for s, i in expected if (s, i) not in filled]
+        for r in p["rows"]:
+            st = r["status"]
+            if st == "worn":
+                m["equipped"] += 1
+            elif st in SATISFIED_STATUSES:      # in their bags / own shared bank
+                m["on_hand"] += 1
+            elif st in MOVE_STATUSES:
+                m["incoming"][st] = m["incoming"].get(st, 0) + 1
+                if r["stale_source"]:
+                    m["stale_moves"] += 1
+            else:
+                m["blocked"].append({"slot": r["slot"], "item": r["item_name"],
+                                     "status": st, "note": r["note"]})
+        m["moves"] = sum(m["incoming"].values())
+        m["state"] = ("blocked" if m["blocked"] else
+                      "moves" if m["moves"] else
+                      "onhand" if m["on_hand"] else "ready")
+        members.append(m)
+
+    states = {k: 0 for k in READINESS_STATES}
+    for m in members:
+        states[m["state"]] += 1
+    return {"members": members, "plan": plan, "check": check,
+            "summary": {"members": len(members), "states": states,
+                        "logins": len(plan["workorder"]), "stale_h": stale_h,
+                        "ready": states["ready"] == len(members) and bool(members)}}
+
+
 # --- light fit (for the sets list; no item DB needed) --------------------------
 
 def fit_counts(conn, eq_dir):
-    """set_id -> {"worn": n, "present": n, "total": n} against the target's dump."""
+    """set_id -> {"worn": n, "present": n, "total": n, "worn_total": n} against the
+    target's dump. worn_total excludes virtual slots (Avatar): that weapon lives in the
+    bags on purpose, so counting it as a missing worn piece would leave every monk set
+    reading "18/19 worn" forever and make a complete set look broken."""
     world = _load_world(conn, eq_dir)
     out = {}
     for s in list_sets(conn):
         tgt = s["assigned_char_id"] or s["source_char_id"]
         tinv = world["inv"].get(tgt)
         total = len(s["items"])
+        worn_total = sum(1 for it in s["items"] if it["slot"] not in EXTRA_SLOT_NAMES)
         if tinv is None:
-            out[s["id"]] = {"worn": None, "present": None, "total": total}
+            out[s["id"]] = {"worn": None, "present": None, "total": total,
+                            "worn_total": worn_total}
             continue
         worn_stock, all_stock = {}, {}
         for _, iid, _ in tinv["worn"]:
@@ -951,11 +1675,14 @@ def fit_counts(conn, eq_dir):
         worn = present = 0
         for it in s["items"]:
             iid = it["item_id"]
-            if worn_stock.get(iid, 0) > 0:
+            # Virtual slots never consume a WORN copy - the Avatar weapon is in the bags
+            # by design - but they still consume a held copy, so "on hand" stays honest.
+            if it["slot"] not in EXTRA_SLOT_NAMES and worn_stock.get(iid, 0) > 0:
                 worn_stock[iid] -= 1
                 worn += 1
             if all_stock.get(iid, 0) > 0:
                 all_stock[iid] -= 1
                 present += 1
-        out[s["id"]] = {"worn": worn, "present": present, "total": total}
+        out[s["id"]] = {"worn": worn, "present": present, "total": total,
+                        "worn_total": worn_total}
     return out

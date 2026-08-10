@@ -136,6 +136,12 @@ main { max-width: 1500px; margin: 0 auto; padding: 12px 20px; }
   color: var(--text); border-radius: 20px; padding: 3px 6px 3px 12px;
   font-size: 12.5px; white-space: nowrap;
 }
+.toon-chip-off { opacity: .4; }
+.tc-server {
+  font-size: 11px; padding: 2px 6px; margin-right: 6px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+}
 .toon-chip .tc-n { font-family: var(--font-mono); font-size: 11px; color: var(--info); }
 .toon-chip .tc-x { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 3px; }
 .toon-chip .tc-x:hover { color: var(--danger); }

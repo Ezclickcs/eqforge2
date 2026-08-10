@@ -111,5 +111,10 @@ CREATE TABLE IF NOT EXISTS composition_slots (
     composition_id INTEGER NOT NULL REFERENCES compositions(id) ON DELETE CASCADE,
     slot_index     INTEGER NOT NULL,                 -- 0..5
     character_id   INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+    -- WHICH gear set this comp fields for that toon. Most toons own several (Zyrak
+    -- has Rogue Main, Sleeper Rogue 3 and Zyrak (Rogue)), so without this the
+    -- "apply this comp's gear" action has to guess, and the old guess -- newest
+    -- updated active set -- silently picked a set from a different comp.
+    gear_set_id    INTEGER REFERENCES gear_sets(id) ON DELETE SET NULL,
     PRIMARY KEY (composition_id, slot_index)
 );

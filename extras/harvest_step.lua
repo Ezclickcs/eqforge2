@@ -163,7 +163,13 @@ end
 --     can run them without the 2026-07-25 shared-file write race. EQ Forge merges them.
 mq.cmd('/lua run mychars_export')
 mq.cmd('/lua run mychars_lockouts')
-log('roster + lockout export queued for %s', me)
+-- Achievements go here too, NOT with the inventory dump below: they are the authoritative
+-- record of keys/flags (Sleeper's Key, tomb/zone access) and do not depend on the bank leg,
+-- so a toon whose inventory dump later fails still contributes them. Verified 2026-08-07
+-- across three toons that the file is fully populated at export time (22.8-22.9k lines,
+-- statuses differentiating correctly), so it needs no settle delay like the Hoard does.
+mq.cmd('/outputfile achievements')
+log('roster + lockout + achievement export queued for %s', me)
 
 -- 2. optional bank leg. Bank and SharedBank arrive in the login packet and need NO
 --    banker; only the Dragon's Hoard (and the Tradeskill Depot) need their window

@@ -32,7 +32,16 @@ def init(conn):
                 "ALTER TABLE accounts ADD COLUMN nickname TEXT DEFAULT ''",
                 "ALTER TABLE accounts ADD COLUMN membership TEXT DEFAULT ''",
                 "ALTER TABLE accounts ADD COLUMN sub_expires INTEGER",
-                "ALTER TABLE accounts ADD COLUMN sub_expires_max INTEGER"):
+                "ALTER TABLE accounts ADD COLUMN sub_expires_max INTEGER",
+                "ALTER TABLE composition_slots ADD COLUMN gear_set_id INTEGER",
+                # Two dead ends from 2026-08-09, both dropped the same day: comp_id
+                # (one comp owns each set) and tag/gear_tag (hand-typed gear families).
+                # Both tried to answer "which sets belong to this comp" with a field;
+                # composition_slots.gear_set_id already answers it, and a set is shared
+                # freely — Rogue Main goes on Gavriel in one comp and Zyrak in another.
+                "ALTER TABLE gear_sets DROP COLUMN comp_id",
+                "ALTER TABLE gear_sets DROP COLUMN tag",
+                "ALTER TABLE compositions DROP COLUMN gear_tag"):
         try:
             conn.execute(ddl)
         except sqlite3.OperationalError:

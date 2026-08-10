@@ -1,6 +1,6 @@
 --[[ ------------------------------------------------------------------------
   MailGear  -  standalone MacroQuest Lua
-  Version 1.0.0
+  Version 1.1.0
 
   Acts on the gear plan exported by EQ Forge 2.0's Gear Planner
   (<MQ>/config/mailgearplan.lua). Dequips planned pieces into bags, pulls
@@ -34,7 +34,7 @@
 
 local mq = require('mq')
 
-local VERSION = '1.0.0'
+local VERSION = '1.2.0'
 
 -- EQ Forge writes the plan under BOTH names: 'mailgearplan.lua' (ours) and the older
 -- 'trixbox_gearplan.lua' (which TrixBox hardcodes). Prefer ours, fall back to the old
@@ -113,14 +113,28 @@ local function activePlan()
     return p
 end
 
--- Every move across EVERY loaded plan, so one toon can settle all its debts in
--- one pass instead of switching plans by hand.
+-- Every routed piece across EVERY loaded plan, so one toon can settle all its
+-- debts in one pass instead of switching plans by hand.
+--
+-- Prefer p.rows over p.moves. `moves` is swap/trade/parcel only - the pieces some
+-- OTHER toon has to hand over. `rows` (EQ Forge 2026-08-09 and later) is every
+-- piece the set calls for, including the ones already sitting on the target:
+--   have  - in the target's own bags/bank. Nobody hands it over, but it still has
+--           to be equipped, and before `rows` existed it never reached this script
+--           at all: "even when the item is already on the toon it needs to be,
+--           sitting in their bag" it just got skipped.
+--   grab  - in the target's own shared bank. A bank pull, not a transfer.
+--   worn  - already on the body. No work, but it RESERVES its slot so the equip
+--           step cannot overwrite a piece the set already has right (see
+--           doEquipItem).
+-- An older export has no `rows`; falling back to `moves` keeps it working exactly
+-- as before.
 local function allMoves()
     if not State.plans then State.plans = loadPlans() end
     if not State.plans then return {} end
     local out = {}
     for _, p in ipairs(State.plans) do
-        for _, mv in ipairs(p.moves or {}) do
+        for _, mv in ipairs(p.rows or p.moves or {}) do
             local c = {}
             for k, v in pairs(mv) do c[k] = v end
             c._plan, c._target = p.name or 'plan', mv.to or p.target
@@ -158,7 +172,32 @@ local function locBucket(loc)
     return EQUIP_SLOTS[head] and 'equipped' or 'other'
 end
 
-local function bucketOf(mv) return locBucket(mv.fromLoc) end
+-- The exporter (mychars/gear.py loc_bucket) is the authority on what a location
+-- means and knows buckets this file's string matching does not - 'depot' being the
+-- live one: a Personal Tradeskill Depot location falls through locBucket() to
+-- 'other', which would have queued an unreachable item for equipping. Prefer the
+-- exported bucket, normalising its one naming difference.
+local BUCKET_ALIAS = { worn = 'equipped' }
+local function bucketOf(mv)
+    local b = string.lower(tostring(mv.bucket or ''))
+    if b ~= '' then return BUCKET_ALIAS[b] or b end
+    return locBucket(mv.fromLoc)            -- older plan: no bucket field
+end
+
+-- Row status as exported by EQ Forge. An OLDER plan file carries no status field
+-- at all, and everything in one of those was a swap/trade/parcel - so a missing
+-- status has to read as transfer work, or upgrading the app would silently empty
+-- every queue built from a plan the user had already exported.
+local function statusOf(mv)
+    local s = string.lower(tostring(mv.status or ''))
+    if s == '' then return 'move' end
+    return s
+end
+
+-- Somebody else hands it over: it lands in this toon's bags, then gets equipped.
+local TRANSFER_STATUS = { swap = true, trade = true, parcel = true, move = true }
+-- Already on the target. No transfer, but not necessarily nothing to do.
+local SELF_STATUS     = { have = true, grab = true }
 
 -- ==========================================================================
 -- cursor + inventory primitives  (ported from TrixBox - proven in the field)
@@ -367,6 +406,12 @@ local function doEquipItem(it, used)
     -- cands[1] whenever BOTH slots were occupied - exactly the case mid-swap,
     -- when both still hold the OLD set. The 2nd earring then overwrote the 1st
     -- one just equipped. Also avoid any slot THIS batch already filled.
+    --
+    -- `used` is now PRE-SEEDED by reservedWornSlots() with every slot that already
+    -- holds a piece this plan wants (see armQueue). That closes the other half of
+    -- the same bug: when only ONE of the two slots needed changing, the good piece
+    -- was in cands[1] and the fallback below overwrote it. reported 2026-08-09: "just
+    -- swaps out the wrist/ring that was recently equipped."
     local target = nil
     for _, idx in ipairs(cands) do              -- 1st choice: empty and untouched
         local okE, empty = pcall(function() return mq.TLO.Me.Inventory(idx)() == nil end)
@@ -378,7 +423,15 @@ local function doEquipItem(it, used)
             if not (used and used[idx]) then target = idx break end
         end
     end
-    target = target or cands[1]
+    if not target then
+        -- Every slot this piece could take is already holding a piece the set
+        -- wants. Overwriting one would undo gear that is already correct, so stop
+        -- and say so - the old `target = target or cands[1]` fallback is exactly
+        -- what made the second ring eat the first.
+        log('  %s: every %s slot already holds a piece this set wants - left in bags',
+            tostring(it.name), tostring(it.slot))
+        return 'reserved'
+    end
     if used then used[target] = true end
     if not grabItemById(it.id) then log('  equip %s: could not pick up', it.name); return 'failed' end
     if cursorId() ~= it.id then log('  equip %s: wrong item on cursor - abort', it.name); stowCursor(); return 'failed' end
@@ -401,18 +454,64 @@ end
 -- ==========================================================================
 -- queue building
 -- ==========================================================================
-local function mineFrom()   -- moves this toon is HOLDING
+local function mineFrom()   -- transfers this toon is HOLDING for somebody else
     local out = {}
     for _, mv in ipairs(allMoves()) do
-        if tostring(mv.from or '') == Me then table.insert(out, mv) end
+        -- `from` is only ever set on a transfer; self-sourced rows leave it empty
+        -- precisely so they never land in a holder's dequip queue.
+        if tostring(mv.from or '') ~= '' and tostring(mv.from or '') == Me then
+            table.insert(out, mv)
+        end
     end
     return out
 end
 
-local function mineTo()     -- moves destined FOR this toon
+local function mineRows()   -- every row destined FOR this toon, whatever its status
     local out = {}
     for _, mv in ipairs(allMoves()) do
         if tostring(mv.to or '') == Me then table.insert(out, mv) end
+    end
+    return out
+end
+
+-- Pieces this toon can put ON right now: anything handed over by somebody else
+-- (it arrives in the bags), plus anything the set wants that is ALREADY in this
+-- toon's own bags. The second half is the fix for "it's already in their bag and
+-- nothing equips it" - those rows are status 'have', and they used to be filtered
+-- out of the export entirely.
+--
+-- Deliberately NOT queued here:
+--   worn            nothing to do; it only reserves its slot in doEquipItem
+--   have/grab in a bank, shared bank or depot   -> /mailgear getbank first
+--   have in hoard/persona                       -> /mailgear hoard (manual)
+local function mineTo()
+    local out = {}
+    for _, mv in ipairs(mineRows()) do
+        local st = statusOf(mv)
+        if TRANSFER_STATUS[st] then
+            table.insert(out, mv)
+        elseif st == 'have' then
+            local b = bucketOf(mv)
+            -- 'other' is kept as a best-effort: doEquipItem re-checks FindItem and
+            -- reports honestly if it cannot reach the piece. bank/shared/depot/
+            -- hoard/persona/keyring are all deliberately excluded - each has its
+            -- own verb, and queuing one here just produces a confusing failure.
+            if b == 'bags' or b == 'other' then table.insert(out, mv) end
+        end
+    end
+    return out
+end
+
+-- This toon's OWN bank / shared bank rows. Same bank-window work as a holder's
+-- pull, but sourced from the target itself, so mineFrom() never sees them.
+local function mineOwnBank()
+    local out = {}
+    for _, mv in ipairs(mineRows()) do
+        local st = statusOf(mv)
+        if SELF_STATUS[st] then
+            local b = bucketOf(mv)
+            if b == 'bank' or b == 'shared' or b == 'depot' then table.insert(out, mv) end
+        end
     end
     return out
 end
@@ -421,15 +520,65 @@ end
 -- a persona switch. Both are surfaced as a manual checklist instead.
 local function manualPulls()
     local out = {}
-    for _, mv in ipairs(mineFrom()) do
+    local seen = {}
+    local function add(mv)
         local b = bucketOf(mv)
+        local key = tostring(mv.id) .. '|' .. tostring(mv.fromLoc)
+        if seen[key] then return end
         if b == 'hoard' then
+            seen[key] = true
             table.insert(out, { name = mv.name, loc = mv.fromLoc, why = 'hoard', to = mv._target })
         elseif b == 'persona' then
+            seen[key] = true
             table.insert(out, { name = mv.name, loc = 'persona closet', why = 'persona', to = mv._target })
         end
     end
+    for _, mv in ipairs(mineFrom()) do add(mv) end
+    -- The target's OWN hoard/persona counts too: the set wants the piece, it is on
+    -- this very toon, and it is still un-automatable. Before rows/status existed
+    -- these were routed 'have' and dropped from the export, so a piece sitting in
+    -- your own Dragon's Hoard showed up nowhere at all.
+    for _, mv in ipairs(mineRows()) do
+        if SELF_STATUS[statusOf(mv)] then add(mv) end
+    end
     return out
+end
+
+-- Worn slots that must NOT be touched by this equip batch, because they already
+-- hold a piece the plan wants on this toon. Two-slot types are the whole reason
+-- this exists: with one wrist already correct, the incoming wrist has exactly one
+-- legal destination, and without a reservation the fallback picked the wrong one.
+--
+-- Pure TLO reads, so pcall is safe here (no mq.delay may ever cross a pcall).
+local function reservedWornSlots()
+    local rows = mineRows()
+    local wanted = {}                       -- every item id this plan wants on me
+    for _, mv in ipairs(rows) do
+        local id = tonumber(mv.id or 0) or 0
+        if id > 0 then wanted[id] = true end
+    end
+    local used, n = {}, 0
+    for _, mv in ipairs(rows) do
+        local cands = EQUIP_SLOT_IDX[tostring(mv.slot or '')]
+        if cands then
+            for _, idx in ipairs(cands) do
+                if not used[idx] then
+                    local okI, id = pcall(function()
+                        local inv = mq.TLO.Me.Inventory(idx)
+                        if inv() == nil then return 0 end
+                        return tonumber(tostring(inv.ID() or 0)) or 0
+                    end)
+                    if not okI then
+                        log('  (worn slot %d read failed while reserving)', idx)
+                    elseif id > 0 and wanted[id] then
+                        used[idx] = true
+                        n = n + 1
+                    end
+                end
+            end
+        end
+    end
+    return used, n
 end
 
 local function armQueue(kind, items)
@@ -438,8 +587,11 @@ local function armQueue(kind, items)
         return
     end
     if #items == 0 then log('%s: nothing to do on %s.', kind, Me); return end
-    State.queue = { kind = kind, items = items, i = 1, done = 0, skipped = 0, used = {} }
-    log('%s LIVE: %d item(s) armed. (/mailgear stop aborts.)', kind, #items)
+    local used, reserved = {}, 0
+    if kind == 'equip' then used, reserved = reservedWornSlots() end
+    State.queue = { kind = kind, items = items, i = 1, done = 0, skipped = 0, used = used }
+    log('%s LIVE: %d item(s) armed%s. (/mailgear stop aborts.)', kind, #items,
+        reserved > 0 and string.format(', %d worn slot(s) already correct and protected', reserved) or '')
 end
 
 -- ==========================================================================
@@ -466,15 +618,22 @@ local function cmdPlans()
     if not State.plans then return end
     log('gear plans loaded: %d (active #%d)', #State.plans, State.planIdx or 1)
     for i, p in ipairs(State.plans) do
-        local mine, to = 0, 0
-        for _, mv in ipairs(p.moves or {}) do
-            if tostring(mv.from or '') == Me then mine = mine + 1 end
-            if tostring(mv.to   or '') == Me then to   = to   + 1 end
+        local mine, to, here = 0, 0, 0
+        for _, mv in ipairs(p.rows or p.moves or {}) do
+            local st = statusOf(mv)
+            if tostring(mv.from or '') ~= '' and tostring(mv.from or '') == Me then mine = mine + 1 end
+            if tostring(mv.to or '') == Me then
+                -- Separate "somebody owes you this" from "it is already on you and
+                -- just needs putting on" - they are different jobs on your side.
+                if TRANSFER_STATUS[st] then to = to + 1
+                elseif SELF_STATUS[st] then here = here + 1 end
+            end
         end
-        log('  %s#%d %s -> %s  (%d move(s)%s%s)', (i == (State.planIdx or 1)) and '*' or ' ',
+        log('  %s#%d %s -> %s  (%d move(s)%s%s%s)', (i == (State.planIdx or 1)) and '*' or ' ',
             i, tostring(p.name or 'plan'), tostring(p.target or '?'), #(p.moves or {}),
             mine > 0 and string.format(', %d from you', mine) or '',
-            to   > 0 and string.format(', %d TO you',  to)   or '')
+            to   > 0 and string.format(', %d TO you',  to)   or '',
+            here > 0 and string.format(', %d already on you', here) or '')
     end
 end
 
@@ -530,6 +689,9 @@ local function cmdGetBank()
         local b = bucketOf(mv)
         if b == 'bank' or b == 'shared' then table.insert(items, mv) end
     end
+    -- ...plus this toon's own banked pieces (status have/grab). Same pull, but the
+    -- toon is both holder and target, so mineFrom() cannot see them.
+    for _, mv in ipairs(mineOwnBank()) do table.insert(items, mv) end
     if #items == 0 then log('getbank: %s has no plan pieces in the bank.', Me); return end
     if not State.live then return preview('getbank', items, 'pull from bank') end
     if not mq.TLO.Window('BigBankWnd').Open() then
@@ -541,7 +703,18 @@ end
 
 local function cmdEquip()
     local items = mineTo()
-    if #items == 0 then log('equip: nothing in the plan is destined for %s.', Me); return end
+    if #items == 0 then
+        -- Distinguish "no rows for you" from "your rows are all somewhere this verb
+        -- cannot reach", which is what sends people looking for a bug that isn't one.
+        local banked, manual = #mineOwnBank(), #manualPulls()
+        if banked > 0 or manual > 0 then
+            log('equip: nothing to put on yet - %d piece(s) are still in the bank (/mailgear getbank at a banker)%s.',
+                banked, manual > 0 and string.format(' and %d need a manual pull (/mailgear hoard)', manual) or '')
+        else
+            log('equip: nothing in the plan is destined for %s.', Me)
+        end
+        return
+    end
     if not State.live then return preview('equip', items, 'equip') end
     armQueue('equip', items)
 end
@@ -674,7 +847,10 @@ while true do
                 if doPullFromBank(it) then q.done = q.done + 1 else q.skipped = q.skipped + 1 end
             elseif q.kind == 'equip' then
                 local r = doEquipItem(it, q.used)
-                if r == 'equipped' or r == 'worn' then q.done = q.done + 1 else q.skipped = q.skipped + 1 end
+                -- 'reserved' = the slot already holds a piece this set wants. That is
+                -- a correct outcome, not a failure, so it must not read as skipped.
+                if r == 'equipped' or r == 'worn' or r == 'reserved' then q.done = q.done + 1
+                else q.skipped = q.skipped + 1 end
             end
             if advance and State.queue then q.i = q.i + 1 end
         end

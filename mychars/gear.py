@@ -36,8 +36,13 @@ SEARCHABLE_STATS = STAT_FIELDS + [("haste", "Haste %")]
 EFFECT_COLS = [("focuseffect", "focuses"), ("clickeffect", "clickies"),
                ("worneffect", "worneffects"), ("proceffect", "procs")]
 
+# maxcharges: -1 = unlimited (a reusable clicky), a positive number = consumable.
+# It is the only clean separator between "Trinket of the Far Frozen Wastes" and the
+# 30-odd potions that also have a click effect and no worn slot — see
+# gearsets._is_bag_clicky.
 NEEDED_COLS = ["id", "name", "classes", "races", "reqlevel", "slots", "haste",
-               "nodrop", "fvnodrop", "loregroup", "itemtype"] + STAT_KEYS + [c for c, _ in EFFECT_COLS]
+               "nodrop", "fvnodrop", "loregroup", "itemtype",
+               "maxcharges"] + STAT_KEYS + [c for c, _ in EFFECT_COLS]
 
 # EQ class bitmask order (bit 0 = WAR ... bit 15 = BER)
 CLASS_BITS = ["Warrior", "Cleric", "Paladin", "Ranger", "Shadow Knight", "Druid",
@@ -197,6 +202,24 @@ def parse_dump(path):
     return {"worn": worn, "held": held}
 
 
+def is_character_dump(name, server=""):
+    """Is `<name>_<server>-Inventory.txt` really a CHARACTER's inventory?
+
+    EQ also writes corpse dumps — `Vexrin's corpse0_frostreaver-Inventory.txt` — and
+    those parse as a toon called "Vexrin's corpse0" holding 43 items, which then shows
+    up as a roster member and its gear counts as owned (reported 2026-08-10). EQ names it
+    `<Name>'s corpse<n>`, so the apostrophe and space are the tell.
+
+    A character name is ONE word with no punctuation. Kept at alphanumeric rather than
+    letters-only (which is what EQ actually allows) so a hand-renamed dump is not
+    rejected over something this guard does not care about. `server` may be empty for
+    a renamed dump; when present it must look like a server name too.
+    """
+    if not name or not name.isalnum():
+        return False
+    return not server or server.isalnum()
+
+
 def list_dumps(eq_dir):
     """-> {(name_lower, server_lower): (path, mtime)}"""
     out = {}
@@ -207,7 +230,7 @@ def list_dumps(eq_dir):
             continue
         base = fn[:-len("-Inventory.txt")]
         name, _, server = base.partition("_")
-        if not name:
+        if not is_character_dump(name, server):
             continue
         fp = os.path.join(eq_dir, fn)
         out[(name.lower(), server.lower())] = (fp, int(os.path.getmtime(fp)))
