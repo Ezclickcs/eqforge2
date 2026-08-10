@@ -37,7 +37,13 @@ SKIP_FILES = {"CLAUDE.md", "AGENTS.md", "GEMINI.md", ".gitignore", "mychars.db",
               # be named here too or every zip redistributes them. Recipients run
               # tools/build_spells.py against their own install; both loaders are
               # non-fatal, so without them effect labels just degrade to "Combat Proc".
-              "spell-effects.json.gz", "focus-families.json"}
+              "spell-effects.json.gz", "focus-families.json",
+              # One-off repair written against ONE roster's rows (specific set names
+              # and item ids). Gitignored for the same reason, but this script walks
+              # the filesystem, so it has to be named here too. Its generic siblings
+              # -- carve_deleted_gearset_rows.py, fix_unslotted_gearset_rows.py --
+              # are useful to anyone and do ship.
+              "restore_stolen_gearset_picks.py"}
 BLANKED = {"app/toon-profiles.json": "{}\n"}          # personal → shipped empty
 
 
